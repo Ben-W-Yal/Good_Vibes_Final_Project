@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<customMapSource>
+	<name>Google Terrain</name>
+	<minZoom>0</minZoom>
+	<maxZoom>15</maxZoom>
+	<tileType>png</tileType>
+	<tileUpdate>None</tileUpdate>
+	<serverParts>0 1 2 3</serverParts>
+	<url>http://mt{$serverpart}.google.com/vt/lyrs=t,r&amp;hl={$lang}&amp;x={$x}&amp;y={$y}&amp;z={$z}</url>
+	<backgroundColor>#000000</backgroundColor>
+</customMapSource>

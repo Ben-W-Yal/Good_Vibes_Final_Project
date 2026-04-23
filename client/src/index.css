@@ -1,0 +1,118 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ── Design tokens ── */
+:root {
+  --bg-base:      #0d1117;
+  --bg-panel:     #161b22;
+  --bg-card:      #1c2333;
+  --bg-hover:     #21262d;
+  --border:       #30363d;
+  --border-light: #21262d;
+  --text-primary: #e6edf3;
+  --text-muted:   #8b949e;
+  --text-dim:     #6e7681;
+  --accent:       #1f6feb;
+  --accent-hover: #388bfd;
+  --accent-glow:  rgba(31, 111, 235, 0.25);
+  --red:          #f85149;
+  --orange:       #f0883e;
+  --yellow:       #d29922;
+  --green:        #3fb950;
+  --purple:       #8957e5;
+  --cyan:         #39c5cf;
+}
+
+/* ── Base ── */
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background: var(--bg-base);
+  color: var(--text-primary);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-dim); }
+
+/* ── Tailwind overrides for dark theme ── */
+@layer base {
+  * { border-color: var(--border); }
+
+  .dark {
+    --background: 13 17 23;
+    --foreground: 230 237 243;
+    --card: 22 27 34;
+    --card-foreground: 230 237 243;
+    --popover: 22 27 34;
+    --popover-foreground: 230 237 243;
+    --primary: 31 111 235;
+    --primary-foreground: 255 255 255;
+    --secondary: 33 38 45;
+    --secondary-foreground: 139 148 158;
+    --muted: 33 38 45;
+    --muted-foreground: 139 148 158;
+    --accent: 33 38 45;
+    --accent-foreground: 230 237 243;
+    --destructive: 248 81 73;
+    --destructive-foreground: 255 255 255;
+    --border: 48 54 61;
+    --input: 48 54 61;
+    --ring: 31 111 235;
+    --radius: 0.5rem;
+  }
+}
+
+/* ── Severity colors ── */
+.sev-critical { color: var(--red); }
+.sev-high     { color: var(--orange); }
+.sev-medium   { color: var(--yellow); }
+.sev-low      { color: var(--green); }
+
+.bg-sev-critical { background: rgba(248,81,73,0.12); border-color: rgba(248,81,73,0.3); }
+.bg-sev-high     { background: rgba(240,136,62,0.12); border-color: rgba(240,136,62,0.3); }
+.bg-sev-medium   { background: rgba(210,153,34,0.12); border-color: rgba(210,153,34,0.3); }
+.bg-sev-low      { background: rgba(63,185,80,0.12); border-color: rgba(63,185,80,0.3); }
+
+/* ── Pulse animation for live indicator ── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50%       { opacity: 0.5; transform: scale(0.85); }
+}
+.pulse-dot { animation: pulse-dot 1.8s ease-in-out infinite; }
+
+/* ── Fade in ── */
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(4px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-in { animation: fade-in 0.2s ease-out; }
+
+/* ── Slide in from right ── */
+@keyframes slide-in-right {
+  from { transform: translateX(100%); opacity: 0; }
+  to   { transform: translateX(0); opacity: 1; }
+}
+.slide-in-right { animation: slide-in-right 0.25s ease-out; }
+
+/* ── Glass panel ── */
+.glass {
+  background: rgba(22, 27, 34, 0.92);
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid var(--border);
+}
+
+/* ── Event type icon colors ── */
+.icon-strike    { background: #f85149; }
+.icon-missile   { background: #f0883e; }
+.icon-explosion { background: #d29922; }
+.icon-clashes   { background: #388bfd; }
+.icon-protest   { background: #8957e5; }
+.icon-maritime  { background: #39c5cf; }
+.icon-cyber     { background: #3fb950; }
+.icon-political { background: #8b949e; }
+.icon-other     { background: #6e7681; }

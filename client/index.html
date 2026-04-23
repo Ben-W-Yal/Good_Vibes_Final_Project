@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GeoIntel — Live Global Intelligence Map</title>
+    <meta name="description" content="Real-time global intelligence: conflict events, aircraft, ships, satellites, and Presidential Daily Brief." />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+    <link rel="stylesheet" href="https://cesium.com/downloads/cesiumjs/releases/1.126/Build/Cesium/Widgets/widgets.css" />
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body, #root { width: 100vw; height: 100vh; overflow: hidden; background: #0d1117; }
+      /* Hide Cesium default UI chrome */
+      .cesium-widget-credits { display: none !important; }
+      .cesium-viewer-bottom { display: none !important; }
+    </style>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script src="https://cesium.com/downloads/cesiumjs/releases/1.126/Build/Cesium/Cesium.js"></script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
