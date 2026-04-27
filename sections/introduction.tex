@@ -12,16 +12,16 @@ The core problem is \textbf{situational overload}: too many sources, too little 
 
 \textbf{Inputs} include configurable OSINT-style event feeds (e.g., GDELT-style news intensity~\cite{gdelt} and structured conflict datasets such as ACLED~\cite{acled} where enabled), optional live trackers for aircraft, maritime traffic, and satellite propagation from public catalogs~\cite{celestrak}, plus user-selected filters for region and time.
 
-\textbf{Outputs} include an interactive \textbf{3D globe} (CesiumJS~\cite{cesium}) with terrain and building visualization where configured. Briefing panels incorporate grounded article citations and imagery when embeddable visuals are available from sources. A \textbf{Presidential Daily Brief} workflow powered by Gemini~\cite{gemini-api} with Google Search grounding produces sectioned narratives with citations and PDF export.
+\textbf{Outputs} include an interactive \textbf{3D globe} (CesiumJS~\cite{cesium}) with terrain and building visualization where configured. Briefing panels incorporate grounded article citations and imagery when embeddable visuals are available from sources. A \textbf{Presidential Daily Brief} workflow powered by Gemini~\cite{gemini-api} with Google Search grounding produces sectioned narratives with citations and PDF export. At \textbf{single-event} granularity, selecting a feed item opens an \textbf{AI analyst summary} (streamed briefing) and a \textbf{follow-up chat} so users can ask targeted questions grounded in that event's normalized fields and related links.
 
-\textbf{Typical user journey:} (1)~configure keys and feeds in the environment; (2)~pan and tilt the globe to the theater of interest; (3)~inspect events and trackers in context of geography; (4)~generate multi-section AI briefs per editorial ``slides''; (5)~export PDF for submission or discussion.
+\textbf{Typical user journey:} (1)~configure keys and feeds in the environment; (2)~pan and tilt the globe to the theater of interest; (3)~inspect events and trackers in context of geography, including per-event AI summary and chat where desired; (4)~generate multi-section AI briefs per editorial ``slides''; (5)~export PDF for submission or discussion.
 
 \subsection{Why generative AI fits}
 
 Large language models excel at turning heterogeneous evidence into coherent prose under constraints.
 That is exactly what a structured brief requires.
 Gemini~\cite{gemini-api} with search grounding ties statements to retrieved URLs where the API exposes citations, reducing unattributed speculation.
-Python-backed server workflows orchestrate retrieval, normalization, and prompting. Heavy requests stay off the UI thread behind Express~\cite{express} APIs.
+Express~\cite{express} API routes in TypeScript orchestrate retrieval, normalization, and prompting. Heavy requests stay off the UI thread; optional Python tooling exists only for peripheral bridges (e.g., SpaceMouse) described in Implementation.
 
 \subsection{Kalman-style reasoning}
 

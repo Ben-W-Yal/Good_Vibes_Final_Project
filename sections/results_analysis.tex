@@ -2,13 +2,13 @@
 
 \subsection{What we observe qualitatively}
 
-In internal runs during development, GeoIntel reliably delivers three coupled outcomes end-to-end: \textbf{(i)} users can relocate quickly from headline-scale curiosity to map-scale geography; \textbf{(ii)} PDB sections tend to arrive as structured narratives with accompanying citations when Gemini~\cite{gemini-api} grounding succeeds; and \textbf{(iii)} optional ion-backed terrain and OSM-style building meshes~\cite{cesium}, when enabled, give urban theaters recognizable vertical structure beyond satellite imagery alone. PDF export remains available for slide-shaped classroom deliverables when a document artifact is preferable to screen capture.
+In internal runs during development, GeoIntel reliably delivers four coupled outcomes end-to-end: \textbf{(i)} users can relocate quickly from headline-scale curiosity to map-scale geography; \textbf{(ii)} PDB sections tend to arrive as structured narratives with accompanying citations when Gemini~\cite{gemini-api} grounding succeeds; \textbf{(iii)} optional ion-backed terrain and OSM-style building meshes~\cite{cesium}, when enabled, give terrain-rich theaters recognizable vertical structure beyond satellite imagery alone; and \textbf{(iv)} per-event panels surface streamed analyst summaries plus conversational Q\&A tied to the selected record's context. PDF export remains available for slide-shaped classroom deliverables when a document artifact is preferable to screen capture.
 
 Formal benchmarks were out of scope for this course delivery; claims below are qualitative unless noted.
 
 \subsection{Evidence (figures)}
 
-Figures~\ref{fig:globe}--\ref{fig:terrain} show representative UI captures (integrated dashboard~\cite{cesium}, PDB~\cite{gemini-api}, terrain and buildings).
+Figures~\ref{fig:globe}--\ref{fig:terrain} show the integrated dashboard~\cite{cesium}, PDB~\cite{gemini-api}, and terrain/buildings views. Figure~\ref{fig:event-analyst} highlights per-event Gemini output: auto-generated analyst summary and follow-up chat in the event detail sidebar.
 
 \begin{figure}[ht]
   \centering
@@ -22,6 +22,13 @@ Figures~\ref{fig:globe}--\ref{fig:terrain} show representative UI captures (inte
   \includegraphics[width=\linewidth]{figures/pdb.png}
   \caption{Presidential Daily Brief panel showing multi-section narrative output and citation chips.}
   \label{fig:pdb}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \includegraphics[width=\linewidth]{figures/event-analyst.png}
+  \caption{Event detail sidebar: streamed \textbf{AI analyst summary} of the selected item and \textbf{chat} for follow-up questions (same Gemini route, event-scoped context).}
+  \label{fig:event-analyst}
 \end{figure}
 
 \subsection{Terrain and built environment}
@@ -39,7 +46,7 @@ The dashboard screenshot (Figure~\ref{fig:globe}) emphasizes breadth (filters, f
 
 \textbf{Integrated situational picture:} Combining feeds and trackers with terrain-aware navigation reduces context switching versus opening separate dashboards.
 
-\textbf{Grounded summaries when healthy:} Gemini~\cite{gemini-api} outputs tied to citations improve inspectability versus unconstrained chat answers.
+\textbf{Grounded summaries when healthy:} Gemini~\cite{gemini-api} outputs tied to citations improve inspectability versus unconstrained chat answers. Per-event chat inherits the same caution: answers are only as good as the normalized event fields and related URLs supplied in context.
 
 \textbf{Explicit operational boundaries:} Section-by-section generation surfaces failures locally instead of collapsing an entire deck silently.
 
@@ -55,7 +62,7 @@ The dashboard screenshot (Figure~\ref{fig:globe}) emphasizes breadth (filters, f
 
 \subsection{Informal evaluation}
 
-We exercised representative workflows during integration testing (single-machine demos): globe navigation, feed toggling, PDB generation under configured Gemini~\cite{gemini-api} keys, and PDF export.
+We exercised representative workflows during integration testing (single-machine demos): globe navigation, feed toggling, per-event summaries and chat, PDB generation under configured Gemini~\cite{gemini-api} keys, and PDF export.
 No structured human-subjects study was conducted; informal consensus among teammates emphasized speed-to-context as the strongest perceived gain versus bookmark tabs alone.
 
 \subsection{Operating economics (order-of-magnitude)}

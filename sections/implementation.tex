@@ -31,6 +31,16 @@ Generation proceeds \textbf{section by section} (one request per thematic slide)
 
 \textbf{Agentic tooling:} We do not rely on open-ended autonomous agents browsing the web on their own. The closest analogue is grounded retrieval plus constrained JSON-oriented prompting inside fixed API routes---deterministic orchestration from the server, not emergent agent loops.
 
+\subsection{Per-event AI analyst: summary and chat}
+
+Beyond the PDB deck, the client exposes \textbf{event-scoped} generative assistance in the event detail panel (\texttt{EventDetail.tsx}).
+
+When the user selects an event, the UI builds a structured \texttt{eventContext} string from the normalized record: title, description, background, place, coordinates, severity, primary source URL, timestamps, and up to ten related article titles/URLs.
+
+It then calls \texttt{POST /api/chat} with \texttt{mode: "summary"} and a fixed analyst-style prompt requesting four short paragraphs (situation, actors and location, strategic ``so what,'' and a watch-for line). The server streams Gemini tokens back as plain text for progressive display.
+
+The \textbf{follow-up chat} reuses the same route with \texttt{mode: "chat"}, appending user and assistant turns. The server applies a consistent analyst persona and instructions to anchor claims in the supplied context, avoid inventing casualty figures or quotes, and preserve conversational continuity. Temperature and output token limits differ by mode (tighter for chat). This path does not invoke Google Search grounding; it relies on the event payload and related links already ingested by adapters---complementary to the PDB's web-grounded sections.
+
 \subsection{PDF export}
 
 Brief PDF export is handled \textbf{in the browser}: the UI captures rendered slide content and emits a PDF (client-side libraries), avoiding server-side storage of generated documents.

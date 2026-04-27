@@ -33,6 +33,8 @@ The Presidential Daily Brief panel generates sectioned intelligence writeups, th
 - On-screen briefing review
 - PDF export
 
+When you open an event from the map or feed, the **event detail** sidebar can show an **AI analyst summary** (auto-generated, streamed) and a **chat** panel for follow-up questions about that event (same Gemini backend, scoped to the event’s normalized fields and related article links).
+
 ## High-Level Architecture
 
 - **Frontend:** React + TypeScript (`client/`)
