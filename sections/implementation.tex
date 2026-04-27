@@ -1,0 +1,58 @@
+\section{Implementation}
+
+\subsection{Architecture overview}
+
+GeoIntel follows a classic three-tier layout: a React~\cite{react} single-page client, an Express~\cite{express} HTTP API in TypeScript, and pluggable upstream adapters that normalize heterogeneous feeds into shared schemas before the UI renders them on a CesiumJS globe~\cite{cesium}.
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Client (}\texttt{client/}\textbf{):} React and TypeScript; CesiumJS for the 3D map; panels for filters, events, trackers, and the Presidential Daily Brief (PDB).
+  \item \textbf{Server (}\texttt{server/}\textbf{):} Express registers REST routes under \texttt{/api/...}; shared adapter logic lives under \texttt{src/adapters/} with validation (e.g., Zod) where applicable.
+  \item \textbf{Data plane:} External providers (news/conflict feeds, trackers, satellite TLE sources) are fetched server-side only; credentials stay in environment variables loaded at startup (\texttt{dotenv}).
+\end{enumerate}
+
+Development uses \texttt{tsx} to run TypeScript directly; production builds bundle the server (\texttt{npm run build}, \texttt{npm start}). The client is developed with Vite and served through the same dev server in typical setups described in the repository README.
+
+\subsection{Globe, terrain, and imagery}
+
+The map uses \textbf{CesiumJS}. Optional \textbf{Cesium ion} terrain and OSM-style building enhancements are toggled via client env vars (e.g., \texttt{VITE\_CESIUM\_ION\_TOKEN}, \texttt{VITE\_CESIUM\_ENABLE\_TERRAIN}, \texttt{VITE\_CESIUM\_ENABLE\_BUILDINGS}). Without a token, the globe still runs with reduced 3D fidelity.
+
+Brief sections can attach \textbf{grounded visuals}: map focus derived from modeled regions plus article imagery extracted from citation pages when embeddable images exist. That pairs narrative output with geographic and visual context.
+
+\subsection{Feeds and trackers}
+
+Each external source has an adapter module under \texttt{src/adapters/}. Examples include GDELT-style document queries~\cite{gdelt}, ACLED where credentials allow~\cite{acled}, AIS streams and AISHub for maritime context, OpenSky and optional supplemental aircraft sources~\cite{opensky}, and CelesTrak-based TLE propagation for satellites~\cite{celestrak}. Responses are cached server-side with TTLs to respect rate limits and stability.
+
+\subsection{Generative AI: Presidential Daily Brief}
+
+The PDB workflow calls Google's \textbf{Gemini} models through the Gemini API~\cite{gemini-api}. When search grounding is enabled, the server sends requests that include the Google Search tool so outputs can cite retrieved URLs.
+The client renders citations as links and persists successful section payloads in browser storage for resilience across reloads.
+
+Generation proceeds \textbf{section by section} (one request per thematic slide), which is a deliberate multi-call pipeline rather than a single monolithic completion: it trades extra latency for clearer failure isolation and UI progress feedback.
+
+\textbf{Agentic tooling:} We do not rely on open-ended autonomous agents browsing the web on their own. The closest analogue is grounded retrieval plus constrained JSON-oriented prompting inside fixed API routes---deterministic orchestration from the server, not emergent agent loops.
+
+\subsection{PDF export}
+
+Brief PDF export is handled \textbf{in the browser}: the UI captures rendered slide content and emits a PDF (client-side libraries), avoiding server-side storage of generated documents.
+
+\subsection{Optional SpaceMouse bridge}
+
+For 3D navigation hardware, an optional \textbf{Python} bridge (\texttt{script/spacemouse\_bridge.py}) can expose SpaceMouse motion over a local WebSocket (\texttt{127.0.0.1:8765}). \texttt{npm run dev} attempts to start this bridge when the port is free; \texttt{npm run dev:no-spacemouse} skips it.
+
+\subsection{Configuration and secrets}
+
+Secrets (Gemini keys, tracker keys, ion tokens, etc.) live only in \texttt{.env} or equivalent host env---never committed to reports or screenshots at full resolution if pasted verbatim. The repository ships \texttt{.env.example} as a template; operators copy it to \texttt{.env} locally.
+
+\subsection{Reproducibility}
+
+This write-up mirrors the deliverable expectations for the course final project (written report + code repository with runnable instructions)~\cite{course-req}.
+
+\textbf{Repository:} \url{https://github.com/Ben-W-Yal/Good_Vibes_Final_Project}
+
+\textbf{Steps to run locally:}
+\begin{enumerate}[leftmargin=*]
+  \item Clone the repo and install dependencies: \texttt{npm install}.
+  \item Copy \texttt{.env.example} to \texttt{.env} and add at minimum a valid Gemini API key plus any optional provider keys you need for trackers or enhanced terrain.
+  \item Start development: \texttt{npm run dev} (or \texttt{npm run dev:no-spacemouse} without the SpaceMouse bridge).
+  \item Open the served URL (default port shown in server logs, commonly \texttt{localhost:3000} in development).
+\end{enumerate}

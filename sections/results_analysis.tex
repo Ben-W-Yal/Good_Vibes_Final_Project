@@ -1,0 +1,75 @@
+\section{Results and Analysis}
+
+\subsection{What we observe qualitatively}
+
+In internal runs during development, GeoIntel reliably delivers three coupled outcomes end-to-end: \textbf{(i)} users can relocate quickly from headline-scale curiosity to map-scale geography; \textbf{(ii)} PDB sections tend to arrive as structured narratives with accompanying citations when Gemini~\cite{gemini-api} grounding succeeds; and \textbf{(iii)} exporting to PDF preserves slide-shaped layouts suitable for classroom submission.
+
+Formal benchmarks were out of scope for this course delivery; claims below are qualitative unless noted.
+
+\subsection{Evidence (figures to substitute before final submission)}
+
+Figures~\ref{fig:globe}--\ref{fig:pdf} show representative UI placeholders (globe~\cite{cesium}, PDB~\cite{gemini-api}, PDF export). Replace gray boxes with screenshots from your demo machine before submitting the PDF.
+
+\begin{figure}[ht]
+  \centering
+  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: Cesium globe with event overlays]\vspace{1.8cm}}}
+  \caption{Cesium globe with conflict/news-style markers and filtering chrome visible.}
+  \label{fig:globe}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: PDB panel with sections and citations]\vspace{1.8cm}}}
+  \caption{Presidential Daily Brief panel showing multi-section narrative output and citation chips.}
+  \label{fig:pdb}
+\end{figure}
+
+\begin{figure}[ht]
+  \centering
+  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: exported PDF brief excerpt]\vspace{1.8cm}}}
+  \caption{Exported PDF excerpt illustrating slide-oriented formatting.}
+  \label{fig:pdf}
+\end{figure}
+
+\subsection{Strengths}
+
+\textbf{Integrated situational picture:} Combining feeds and trackers with terrain-aware navigation reduces context switching versus opening separate dashboards.
+
+\textbf{Grounded summaries when healthy:} Gemini~\cite{gemini-api} outputs tied to citations improve inspectability versus unconstrained chat answers.
+
+\textbf{Explicit operational boundaries:} Section-by-section generation surfaces failures locally instead of collapsing an entire deck silently.
+
+\subsection{Limitations and brittle behavior}
+
+\textbf{Upstream variability:} GDELT-like endpoints~\cite{gdelt} can throttle or return sparse windows; AIS feeds depend on reception patterns and credential tiers.
+
+\textbf{Model behavior:} Grounded briefings occasionally truncate JSON-shaped outputs under token limits or overload responses; citation counts fluctuate by topic.
+
+\textbf{Imagery extraction:} Article imagery depends on publisher markup (Open Graph/Twitter tags); many pages yield no embeddable preview image even when reporting is solid.
+
+\textbf{Geolocation realism:} Automated coordinates can default to coarse regions when upstream feeds omit precise lat/lon.
+
+\subsection{Informal evaluation}
+
+We exercised representative workflows during integration testing (single-machine demos): globe navigation, feed toggling, PDB generation under configured Gemini~\cite{gemini-api} keys, and PDF export.
+No structured human-subjects study was conducted; informal consensus among teammates emphasized speed-to-context as the strongest perceived gain versus bookmark tabs alone.
+
+\subsection{Operating economics (order-of-magnitude)}
+
+Costs split into three buckets:
+
+\begin{enumerate}[leftmargin=*]
+  \item \textbf{Gemini usage:} PDB generation triggers multiple grounded completions per full brief~\cite{gemini-api}; expense scales with sections generated and repeat trials during demos.
+  \item \textbf{Third-party trackers/maps:} Optional licensed trackers (where configured) carry vendor-specific metering; Cesium ion terrain/buildings~\cite{cesium} depends on ion quotas tied to project tokens.
+  \item \textbf{Hosting footprint:} Local development requires modest CPU/RAM; production deployment cost depends on hosting provider selection not exercised here.
+\end{enumerate}
+
+\subsection{Competitive landscape}
+
+\textbf{News-only aggregators} optimize headlines but rarely fuse spatial trackers with citation-grounded narratives.
+
+\textbf{Standalone globe tools} visualize geography without coherent briefing pipelines tuned to structured intelligence sections.
+
+\textbf{Consumer chatbots} answer questions conversationally yet omit reproducible APIs under controlled adapters and persistent globe-linked inspection patterns implemented here.
+
+GeoIntel differentiates through \textbf{(i)} adapter-backed ingestion under explicit caching discipline and \textbf{(ii)} coupling Gemini-grounded PDB outputs~\cite{gemini-api} with terrain-centric exploration~\cite{cesium} rather than chat-only summaries.

@@ -1,0 +1,36 @@
+\section{Introduction}
+
+\subsection{Motivation}
+
+Understanding modern conflict increasingly means making sense of fast-moving, fragmentary signals: social posts, wire copy, tracker data, and satellite news that rarely arrive in one place. Consumers and analysts alike face the same failure mode: headlines without terrain, timelines without geography, and narratives that age out before context arrives. GeoIntel addresses this gap by coupling open-source feeds with interactive mapping and generative summarization so users relate events to \emph{where} they occur and \emph{what} surrounds them---terrain, urban structure, coastlines, and borders---rather than scanning disconnected feeds.
+
+\subsection{Problem statement and intended users}
+
+The core problem is \textbf{situational overload}: too many sources, too little integration, and weak coupling between narrative reporting and geographic reality. GeoIntel targets students, analysts, journalists, and technically minded observers who need a single workspace to explore conflict-related signals, overlay mobility where available, and produce structured written assessments grounded in web evidence.
+
+\subsection{Plain-language system description}
+
+\textbf{Inputs} include configurable OSINT-style event feeds (e.g., GDELT-style news intensity~\cite{gdelt} and structured conflict datasets such as ACLED~\cite{acled} where enabled), optional live trackers for aircraft, maritime traffic, and satellite propagation from public catalogs~\cite{celestrak}, plus user-selected filters for region and time.
+
+\textbf{Outputs} include an interactive \textbf{3D globe} (CesiumJS~\cite{cesium}) with terrain and building visualization where configured. Briefing panels incorporate grounded article citations and imagery when embeddable visuals are available from sources. A \textbf{Presidential Daily Brief} workflow powered by Gemini~\cite{gemini-api} with Google Search grounding produces sectioned narratives with citations and PDF export.
+
+\textbf{Typical user journey:} (1)~configure keys and feeds in the environment; (2)~pan and tilt the globe to the theater of interest; (3)~inspect events and trackers in context of geography; (4)~generate multi-section AI briefs per editorial ``slides''; (5)~export PDF for submission or discussion.
+
+\subsection{Why generative AI fits}
+
+Large language models excel at turning heterogeneous evidence into coherent prose under constraints.
+That is exactly what a structured brief requires.
+Gemini~\cite{gemini-api} with search grounding ties statements to retrieved URLs where the API exposes citations, reducing unattributed speculation.
+Python-backed server workflows orchestrate retrieval, normalization, and prompting. Heavy requests stay off the UI thread behind Express~\cite{express} APIs.
+
+\subsection{Kalman-style reasoning}
+
+We adopt an intuition borrowed from estimation theory: treat latent conflict ``state'' as something we \emph{predict} from prior observations (historical posts and rolling behavior of feeds), then \emph{update} when fresh measurements arrive---here, grounded web search and contemporaneous indicators. This framing disciplines narrative drift and foregrounds reconciliation between slow-moving priors and fast-moving news.
+
+\subsection{Limits of the status quo}
+
+Traditional dashboards stack widgets without geographic immersion; pure chat assistants lack trustworthy maps and validated feeds; raw APIs demand analyst glue code. GeoIntel trades maximal autonomy for \textbf{explainability}: citations, explicit sections, and map-linked inspection reduce pure ``black box'' summaries while remaining faster than manual drafting.
+
+\subsection{Ethics, risk, and governance}
+
+GeoIntel uses only user-supplied credentials for external APIs and never belongs in classroom submissions as ``classified'' intelligence output; all materials remain \textbf{unclassified OSINT}. Users must respect provider terms of service and rate limits; automated summaries can misread ambiguous reporting or amplify noisy trends. Disclosure matters: downstream readers should treat AI-authored sections as analyst aids requiring verification, especially around casualty counts and contested claims.

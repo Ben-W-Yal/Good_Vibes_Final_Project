@@ -1,0 +1,29 @@
+\section{Conclusion}
+
+\subsection{Summary}
+
+GeoIntel tackles the situational overload problem posed in the Introduction: fragmented conflict and OSINT signals are hard to reconcile with geography and with defensible narrative synthesis. By unifying feed ingestion, interactive 3D mapping, and Gemini-grounded briefing in one application, the project shows that users can move faster from headline-scale awareness to map-scale reasoning and citation-backed writing.
+
+\subsection{Main findings and lessons learned}
+
+\textbf{Coupling matters:} Narrative summarization without geography under-serves conflict understanding; geography without narrative oversimplifies motive and consequence. The strongest user experience emerges when citations, imagery (where available), and terrain context co-locate with the brief.
+
+\textbf{Orchestration beats one-shot prompting:} Section-by-section PDB generation is more resilient than a single mega-prompt because failure surfaces per section and partial success still produces value.
+
+\textbf{Humility remains mandatory:} Grounding reduces hallucination risk but does not eliminate it; upstream coverage gaps and ambiguous reporting still require human verification, especially around contested casualty or attribution claims.
+
+\subsection{Roadmap and extensions}
+
+Near-term improvements we would prioritize include: \textbf{(i)} richer evaluation harnesses with gold-standard rubrics for brief quality; \textbf{(ii)} clearer provenance panels that separate ``model inference'' from ``source text'' line by line; \textbf{(iii)} optional localization and multilingual grounding for non-English theaters; and \textbf{(iv)} saved study sessions (bookmarks over time ranges and theater boxes) for repeat classroom demonstrations.
+
+\subsection{AI capabilities in the next 12--24 months}
+
+Improvements in reliability and cost for large multimodal models could let GeoIntel tighten the loop between map interaction and briefing: denser citations, tighter JSON reliability, and potentially on-device assistants for analysts in bandwidth-limited environments. More capable retrieval and tool use (used responsibly and with explicit disclosure) could also support richer comparison across time windows---but only if evaluation and safety practice keep pace.
+
+\subsection{Safety, evaluation, and data needs}
+
+Scaling this idea beyond classroom demos requires systematic red-team exercises for escalation bias, mirrored narratives, and geographic misassignment. Independent evaluation datasets for open-source intelligence briefs are scarce; contributing evaluation rubrics alongside open code would strengthen the ecosystem more than marginal feature growth alone.
+
+\subsection{Closing}
+
+The project demonstrates a practical template: \textbf{treat generative AI as a structured writer under server-side constraints}, not as an autonomous analyst, and \textbf{treat maps and citations as first-class outputs} so users retain the habit of verifying what they see. That combination is the strongest thread back to our original motivation: helping people interact with conflict news through place, evidence, and accountable synthesis.
