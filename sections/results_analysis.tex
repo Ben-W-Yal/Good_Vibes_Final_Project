@@ -7,6 +7,9 @@ Tables~\ref{tab:rubric} and~\ref{tab:rubric-scores} add a small numeric compleme
 
 Formal benchmarks were out of scope for this course delivery; claims below are qualitative unless noted.
 
+\paragraph{Social-amplified and noisy events in practice.}
+Many GlobeEntity rows ultimately trace to social virality or rapid-fire posting (e.g., protest hashtags, strike footage, conflicting early counts) before wire services converge. In one recurring demo pattern, a spike of GDELT-style rows on unrest in a capital appears alongside contradictory headlines; the AI analyst summary and chat are instructed to hedge on unverified casualties, while the PDB section (with grounding) can surface multiple URLs for triage. The UI does not ``solve'' disinformation; it concentrates geography, timestamps, and explicit citations so a human can see \emph{where} rumor clusters before accepting a single line of narrative.
+
 \subsection{Evidence from the running application}
 
 The subsections and paragraphs below introduce each screenshot immediately before it appears so captions stay adjacent to the narrative they support.
@@ -69,6 +72,7 @@ The dashboard view in Figure~\ref{fig:globe} emphasizes breadth (filters, feeds,
 \textbf{Upstream variability:} GDELT-like endpoints~\cite{gdelt} can throttle or return sparse windows; AIS feeds depend on reception patterns and credential tiers.
 
 \textbf{Model behavior:} Grounded briefings occasionally truncate JSON-shaped outputs under token limits or overload responses; citation counts fluctuate by topic.
+In one debugging session, an event chat draft briefly over-attributed an air strike to a state actor when the underlying feed card only contained ``alleged'' language from a secondary tabloid; the error was visible after expanding the primary URL in the sidebar, and tightening chat instructions to quote the event \texttt{description} field reduced recurrence.
 
 \textbf{Imagery extraction:} Article imagery depends on publisher markup (Open Graph/Twitter tags); many pages yield no embeddable preview image even when reporting is solid.
 
@@ -78,6 +82,7 @@ The dashboard view in Figure~\ref{fig:globe} emphasizes breadth (filters, feeds,
 
 We exercised representative workflows during integration testing (single-machine demos): globe navigation, feed toggling, per-event summaries and chat, PDB generation under configured Gemini~\cite{gemini-api} keys, and PDF export.
 No structured human-subjects study was conducted; informal consensus among teammates emphasized speed-to-context as the strongest perceived gain versus bookmark tabs alone.
+\textbf{Outside users:} we did not run a formal session with non-team classmates under IRB-style consent; with more time we would assign three to five volunteers a timed task list (locate an event, generate one PDB section, ask two chat questions) and capture brief exit notes. The rubric scores in Table~\ref{tab:rubric-scores} therefore reflect internal judgment only.
 
 \subsection{Rubric-based self-assessment (lightweight)}
 
@@ -117,22 +122,26 @@ To go one step beyond purely qualitative impressions, all six teammates independ
 \end{table}
 \FloatBarrier
 
+\textbf{Interpretation:} Artifact (A) peaks on \textbf{D2} (structure), consistent with PDB slide templates and section headers. Artifact (B) trails slightly on \textbf{D1} (source anchoring), matching the absence of live web grounding for event chat---the model must lean on the normalized card and related URLs, so raters penalize looser attribution when chatter drifts from those fields. Both score similarly on \textbf{D4} (hedging), suggesting persona prompts are carrying across modes. The narrow row-mean gap (4.25 vs.\ 3.98) is compatible with a single strong narrative surface (PDB) versus a thinner context tube (event thread), not with one being ``broken'' relative to the other.
+
 \subsection{Operating economics (order-of-magnitude)}
 
-Costs split into three buckets:
+Order-of-magnitude figures anchor variable costs (retail API pricing shifts; treat as April~2026 planning estimates):
 
 \begin{enumerate}[leftmargin=*]
-  \item \textbf{Gemini usage:} PDB generation triggers multiple grounded completions per full brief~\cite{gemini-api}; expense scales with sections generated and repeat trials during demos.
-  \item \textbf{Third-party trackers/maps:} Optional licensed trackers (where configured) carry vendor-specific metering; Cesium ion terrain/buildings~\cite{cesium} depends on ion quotas tied to project tokens.
-  \item \textbf{Hosting footprint:} Local development requires modest CPU/RAM; production deployment cost depends on hosting provider selection not exercised here.
+  \item \textbf{Gemini usage:} A full multi-section PDB with search grounding~\cite{gemini-api} can consume on the order of \textbf{tens of thousands} of output tokens plus tool-assisted calls---often \textbf{well under one U.S.\ dollar} per complete brief in our development configuration, though retries or verbose sections move the needle. A single per-event summary plus a short chat thread is typically \textbf{cents}, not dollars.
+  \item \textbf{Third-party trackers/maps:} Optional licensed trackers (where configured) carry vendor-specific metering; Cesium ion terrain/buildings~\cite{cesium} uses project quotas. Classroom demos on free tiers rarely hit hard limits.
+  \item \textbf{Hosting footprint:} Local development requires modest CPU/RAM; production deployment cost depends on provider choice and was not exercised here.
 \end{enumerate}
+
+\textbf{Hypothetical pricing sketch:} As a SaaS analyst workstation for small teams, a \textbf{tiered monthly subscription} (base seats + monthly PDB generation caps + optional premium tracker add-ons) would align recurring revenue with Gemini and data-vendor marginal cost and discourage abusive polling.
 
 \subsection{Competitive landscape}
 
-\textbf{News-only aggregators} optimize headlines but rarely fuse spatial trackers with citation-grounded narratives.
+\textbf{News-only aggregators} (e.g., \emph{Google News}-style headline rivers) optimize breadth but rarely fuse spatial trackers with API-backed, citation-grounded intelligence sections in one workspace.
 
-\textbf{Standalone globe tools} visualize geography without coherent briefing pipelines tuned to structured intelligence sections.
+\textbf{Standalone globe tools} (e.g., \emph{Google Earth}-class viewers) visualize geography without reproducible ingest adapters, structured PDB workflows, and explicit separation between grounded and context-only model calls.
 
-\textbf{Consumer chatbots} answer questions conversationally yet omit reproducible APIs under controlled adapters and persistent globe-linked inspection patterns implemented here.
+\textbf{Consumer chatbots} (e.g., \emph{ChatGPT}-style conversational UIs) answer ad hoc questions yet omit persistent map-linked event state, server-side adapter discipline, and the event-scoped chat pattern implemented here.
 
 GeoIntel differentiates through \textbf{(i)} adapter-backed ingestion under explicit caching discipline and \textbf{(ii)} coupling Gemini-grounded PDB outputs~\cite{gemini-api} with terrain-centric exploration~\cite{cesium} rather than chat-only summaries.

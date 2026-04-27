@@ -2,7 +2,7 @@
 
 \subsection{Summary}
 
-GeoIntel tackles the situational overload problem posed in the Introduction: fragmented conflict and OSINT signals are hard to reconcile with geography and with defensible narrative synthesis. By unifying feed ingestion, interactive 3D mapping, and Gemini-grounded briefing in one application, the project shows that users can move faster from headline-scale awareness to map-scale reasoning and citation-backed writing. The same design ethic extends to \textbf{per-event analyst summaries and chat}: after a user selects a marker, those flows keep the model tethered to the normalized event record and related URLs, offering drill-down Q\&A without pretending the system has independent field reporting.
+GeoIntel tackles the situational overload problem posed in the Introduction: fragmented conflict signals, \textbf{social-media-amplified} rumor, and OSINT noise are hard to reconcile with geography and defensible narrative synthesis. By unifying feed ingestion, interactive 3D mapping, and Gemini-grounded briefing in one application, the project shows that users can move faster from headline-scale awareness (including posts that ricochet through platforms) to map-scale reasoning and citation-backed writing. The same design ethic extends to \textbf{per-event analyst summaries and chat}: after a user selects a marker, those flows keep the model tethered to the normalized event record and related URLs, offering drill-down Q\&A without pretending the system has independent field reporting.
 
 \subsection{Main findings and lessons learned}
 
@@ -12,11 +12,13 @@ GeoIntel tackles the situational overload problem posed in the Introduction: fra
 
 \textbf{Two scales of assistance:} Theater-scale PDB sections (search-grounded where configured) and map-click summaries serve different tasks; both work best when the UI makes the evidence boundary obvious---what came from adapters versus what the model inferred.
 
-\textbf{Humility remains mandatory:} Grounding reduces hallucination risk but does not eliminate it; upstream coverage gaps and ambiguous reporting still require human verification, especially around contested casualty or attribution claims.
+\textbf{Humility remains mandatory:} Grounding reduces hallucination risk but does not eliminate it; upstream coverage gaps and ambiguous reporting still require human verification, especially around contested casualty or attribution claims. When social velocity outruns wire confirmation, the UI's job is to surface hedging and links, not to launder posts into facts.
 
 \subsection{Roadmap and extensions}
 
-Near-term improvements we would prioritize include: \textbf{(i)} richer evaluation harnesses with gold-standard rubrics for brief quality; \textbf{(ii)} clearer provenance panels that separate ``model inference'' from ``source text'' line by line; \textbf{(iii)} optional localization and multilingual grounding for non-English theaters; and \textbf{(iv)} saved study sessions (bookmarks over time ranges and theater boxes) for repeat classroom demonstrations.
+\textbf{Near term (highest impact):} we would prioritize \textbf{(i)} richer evaluation harnesses with gold-standard rubrics for brief quality and \textbf{(ii)} clearer provenance panels that separate ``model inference'' from ``source text'' line by line.
+
+\textbf{Longer horizon:} \textbf{(iii)} optional localization and multilingual grounding for non-English theaters; \textbf{(iv)} saved study sessions (bookmarks over time ranges and theater boxes) for repeat classroom demonstrations.
 
 \subsection{AI capabilities in the next 12--24 months}
 
@@ -28,4 +30,4 @@ Scaling this idea beyond classroom demos requires systematic red-team exercises 
 
 \subsection{Closing}
 
-The project demonstrates a practical template: \textbf{treat generative AI as a structured writer under server-side constraints}, not as an autonomous analyst, and \textbf{treat maps and citations as first-class outputs} so users retain the habit of verifying what they see. The per-event analyst path belongs in that same template: chat is useful only when it stays answerable to the clicked record. That combination is the strongest thread back to our original motivation: helping people interact with conflict news through place, evidence, and accountable synthesis.
+The project demonstrates a practical template: \textbf{treat generative AI as a structured writer under server-side constraints}, not as an autonomous analyst, and \textbf{treat maps and citations as first-class outputs} so users retain the habit of verifying what they see---whether the headline started on social platforms or on wire. The per-event analyst path belongs in that same template: chat is useful only when it stays answerable to the clicked record. That combination closes the arc from the Introduction's situational overload: helping people interact with conflict news \emph{and} social-media-driven narratives through place, evidence, and accountable synthesis.

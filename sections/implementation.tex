@@ -39,7 +39,7 @@ Figure~\ref{fig:architecture} sketches the main trust boundary: the browser talk
     \draw[-{Latex[length=2.1mm]}] (adp) -- (ext);
     \draw[-{Latex[length=2.1mm]}] (gem) -- (ext);
   \end{tikzpicture}
-  \caption{High-level architecture (simplified). Adapters normalize heterogeneous providers; generative routes call Gemini with prompts built from stored context and (for PDB) search tools when enabled.}
+  \caption{Trust boundary and major components (not an autonomous agent loop). Adapters normalize providers; generative routes call Gemini with prompts built from stored context and (for PDB) search tools when enabled.}
   \label{fig:architecture}
 \end{figure}
 \FloatBarrier
@@ -75,6 +75,40 @@ It then calls \texttt{POST /api/chat} with \texttt{mode: "summary"} and a fixed 
 
 The \textbf{follow-up chat} reuses the same route with \texttt{mode: "chat"}, appending user and assistant turns. The server applies a consistent analyst persona and instructions to anchor claims in the supplied context, avoid inventing casualty figures or quotes, and preserve conversational continuity. Temperature and output token limits differ by mode (tighter for chat). This path does not invoke Google Search grounding; it relies on the event payload and related links already ingested by adapters---complementary to the PDB's web-grounded sections.
 
+\subsection{Deterministic generative paths}
+
+Figure~\ref{fig:llm-flow} summarizes the \textbf{fixed} multi-step pattern users trigger: browser requests hit explicit Express handlers; each PDB section is a separate completion with optional Google Search grounding~\cite{gemini-api}; event summary and chat call the same \texttt{/api/chat} route with \texttt{eventContext} but without a planning agent that chooses tools dynamically. Responses stream to the UI. This satisfies the course expectation to describe multi-step LLM flows while stating clearly that we do \emph{not} run open-ended autonomous agents.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}[
+      font=\scriptsize,
+      node distance=0.55cm and 0.75cm,
+      box/.style={
+        rectangle,
+        draw=black!72,
+        rounded corners=2pt,
+        inner sep=4pt,
+        align=center,
+        minimum width=1.55cm,
+      },
+    ]
+    \node[box] (cli) {\textbf{Browser}};
+    \node[box, right=of cli] (api) {\textbf{Express}};
+    \node[box, right=of api] (gem) {\textbf{Gemini}};
+    \node[box, right=of gem] (ui) {\textbf{UI}\\stream};
+    \node[box, above=0.5cm of gem, dashed, inner sep=3pt, font=\tiny] (sea) {Search\\(PDB)};
+    \draw[-{Latex[length=1.8mm]}] (cli) -- node[above, font=\tiny] {HTTP} (api);
+    \draw[-{Latex[length=1.8mm]}] (api) -- node[above, font=\tiny] {route} (gem);
+    \draw[-{Latex[length=1.8mm]}] (gem) -- node[above, font=\tiny] {SSE} (ui);
+    \draw[-{Latex[length=1.8mm]}, dashed] (api.north) to[bend left=25] (sea.west);
+    \draw[-{Latex[length=1.8mm]}, dashed] (sea.east) to[bend left=25] (gem.north);
+  \end{tikzpicture}
+  \caption{Simplified generative path: PDB may attach the Google Search tool per section; event chat uses packaged context only. Arrows are intentional server orbits, not emergent agent planning.}
+  \label{fig:llm-flow}
+\end{figure}
+\FloatBarrier
+
 \subsection{PDF export}
 
 Brief PDF export is handled \textbf{in the browser}: the UI captures rendered slide content and emits a PDF (client-side libraries), avoiding server-side storage of generated documents.
@@ -85,7 +119,10 @@ For 3D navigation hardware, an optional \textbf{Python} bridge (\texttt{script/s
 
 \subsection{Configuration and secrets}
 
-Secrets (Gemini keys, tracker keys, ion tokens, etc.) live only in \texttt{.env} or equivalent host env---never committed to reports or screenshots at full resolution if pasted verbatim. The repository ships \texttt{.env.example} as a template; operators copy it to \texttt{.env} locally.
+Secrets (Gemini keys, tracker keys, ion tokens, etc.) live only in \texttt{.env} or equivalent host environment.
+They are never committed to git, never pasted into this PDF, and \textbf{never legible in screenshots} prepared for class submission.
+
+The repository ships \texttt{.env.example} as a template; operators copy it to \texttt{.env} locally.
 
 \subsection{Reproducibility}
 

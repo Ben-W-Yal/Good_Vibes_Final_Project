@@ -2,15 +2,15 @@
 
 \subsection{Motivation}
 
-Understanding modern conflict increasingly means making sense of fast-moving, fragmentary signals: social posts, wire copy, tracker data, and satellite news that rarely arrive in one place. Consumers and analysts alike face the same failure mode: headlines without terrain, timelines without geography, and narratives that age out before context arrives. GeoIntel addresses this gap by coupling open-source feeds with interactive mapping and generative summarization so users relate events to \emph{where} they occur and \emph{what} surrounds them---terrain, urban structure, coastlines, and borders---rather than scanning disconnected feeds.
+Understanding modern conflict increasingly means making sense of fast-moving, fragmentary signals: \textbf{social-media posts} (often the first ripple around protests, strikes, or disasters), wire copy, tracker data, and satellite news that rarely arrive in one place. Real-time social reporting can surface genuine eyewitness detail; it can also spread rumor, coordinated inauthentic behavior, and context-stripped clips. Consumers and analysts face the same failure mode: headlines without terrain, timelines without geography, and narratives that age out before context arrives. GeoIntel addresses this gap by coupling those signals---as they appear in our normalized event feeds---with interactive mapping and generative summarization so users relate events to \emph{where} they occur and \emph{what} surrounds them---terrain, urban structure, coastlines, and borders---rather than scanning disconnected feeds.
 
 \subsection{Problem statement and intended users}
 
-The core problem is \textbf{situational overload}: too many sources, too little integration, and weak coupling between narrative reporting and geographic reality. GeoIntel targets students, analysts, journalists, and technically minded observers who need a single workspace to explore conflict-related signals, overlay mobility where available, and produce structured written assessments grounded in web evidence.
+The core problem is \textbf{situational overload}: too many sources (including high-volume \textbf{social-derived} and news-indexed events), too little integration, and weak coupling between narrative reporting and geographic reality. GeoIntel targets students, analysts, journalists, and technically minded observers who need a single workspace to explore conflict-related signals, overlay mobility where available, and produce structured written assessments grounded in web evidence.
 
 \subsection{Plain-language system description}
 
-\textbf{Inputs} include configurable OSINT-style event feeds (e.g., GDELT-style news intensity~\cite{gdelt} and structured conflict datasets such as ACLED~\cite{acled} where enabled), optional live trackers for aircraft, maritime traffic, and satellite propagation from public catalogs~\cite{celestrak}, plus user-selected filters for region and time.
+\textbf{Inputs} include configurable OSINT-style event feeds (e.g., GDELT-style document and media intensity~\cite{gdelt}, which indexes global news and \textbf{social-linked} discussion, plus structured conflict datasets such as ACLED~\cite{acled} where enabled), optional live trackers for aircraft, maritime traffic, and satellite propagation from public catalogs~\cite{celestrak}, plus user-selected filters for region and time.
 
 \textbf{Outputs} include an interactive \textbf{3D globe} (CesiumJS~\cite{cesium}) with terrain and building visualization where configured. Briefing panels incorporate grounded article citations and imagery when embeddable visuals are available from sources. A \textbf{Presidential Daily Brief} workflow powered by Gemini~\cite{gemini-api} with Google Search grounding produces sectioned narratives with citations and PDF export. At \textbf{single-event} granularity, selecting a feed item opens an \textbf{AI analyst summary} (streamed briefing) and a \textbf{follow-up chat} so users can ask targeted questions grounded in that event's normalized fields and related links.
 
@@ -21,7 +21,7 @@ The core problem is \textbf{situational overload}: too many sources, too little 
 Large language models excel at turning heterogeneous evidence into coherent prose under constraints.
 That is exactly what a structured brief requires.
 Gemini~\cite{gemini-api} with search grounding ties statements to retrieved URLs where the API exposes citations, reducing unattributed speculation.
-Express~\cite{express} API routes in TypeScript orchestrate retrieval, normalization, and prompting. Heavy requests stay off the UI thread; optional Python tooling exists only for peripheral bridges (e.g., SpaceMouse) described in Implementation.
+Express~\cite{express} API routes in TypeScript orchestrate retrieval, normalization, and prompting. We \textbf{deliberately avoid open-ended agentic loops}: behavior is \emph{deterministic}---section-scoped PDB prompts, fixed \texttt{/api/chat} modes, and server-chosen model parameters---so outputs stay auditable and predictable rather than tool-chasing. Heavy requests stay off the UI thread; optional Python tooling exists only for peripheral bridges (e.g., SpaceMouse) described in Implementation.
 
 \subsection{Stable context versus incoming signals}
 
