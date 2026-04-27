@@ -7,7 +7,7 @@ It is designed for rapid situational awareness:
 - Overlay live aircraft, maritime, and satellite tracks
 - Filter by time window, region, and source
 - Generate a multi-section Presidential Daily Brief (PDB)
-- Export a PDF and generate a narrated video brief
+- Export a PDF brief
 
 ## What This App Does
 
@@ -32,7 +32,6 @@ The app can show moving entities on the same map:
 The Presidential Daily Brief panel generates sectioned intelligence writeups, then supports:
 - On-screen briefing review
 - PDF export
-- Video brief generation (including TTS narration when quota is available)
 
 ## High-Level Architecture
 
@@ -69,22 +68,11 @@ Minimum recommended variables:
 
 ```env
 GEMINI_API_KEY=...
-ELEVENLABS_API_KEY=...                  # needed for narrated video voice
 VITE_CESIUM_ION_TOKEN=...               # optional but recommended for terrain/buildings
 
 GDELT_MAX_ROWS=500
 ACLED_MAX_ROWS=80000
 ```
-
-Optional voice override per presenter:
-
-```env
-ELEVENLABS_VOICE_ARNOLD=your_voice_id
-ELEVENLABS_VOICE_OBAMA=your_voice_id
-ELEVENLABS_VOICE_REAGAN=your_voice_id
-```
-
-If a presenter voice ID is not provided, the app falls back to a default voice mapping.
 
 ## Install and Run
 
@@ -98,16 +86,12 @@ Notes:
 - `npm run dev` also attempts to auto-start the SpaceMouse Python bridge when port `8765` is free.
 - If you only want the app without SpaceMouse bridge startup, use `npm run dev:no-spacemouse`.
 
-## How the Briefing and Video Work
+## How the Briefing Workflow Works
 
 1. Open the PDB panel and click `Generate Brief`.
 2. The server queries Gemini with web-grounded prompts for each briefing section.
 3. Results are saved to section state and persisted locally so the last brief remains available.
-4. Click `Create Video Brief` to render slide video + narration.
-5. Download the generated video (`.mp4` preferred if browser supports it; otherwise `.webm` fallback).
-
-If ElevenLabs quota is exhausted:
-- The app can fall back to silent slide timing instead of hard-failing.
+4. Click `Download PDF` to export the current brief.
 
 ## Provider Notes
 
@@ -158,8 +142,6 @@ If device-open failures occur, close 3Dconnexion helper processes.
 ## Troubleshooting
 
 - **Briefing generation fails:** confirm `GEMINI_API_KEY` is valid and server restarted.
-- **Voice sounds generic:** set explicit presenter voice IDs in `.env` (for example `ELEVENLABS_VOICE_ARNOLD`).
-- **TTS quota exceeded:** verify ElevenLabs credits and workspace/key alignment; fallback mode can still create silent video.
 - **No GDELT results:** upstream can rate-limit; retry after cooldown and keep limits reasonable.
 
 ## Security Note
