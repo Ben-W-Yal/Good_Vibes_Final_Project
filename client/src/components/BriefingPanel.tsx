@@ -62,37 +62,6 @@ const THREAT_BG: Record<BriefSection['threatLevel'], string> = {
   LOW: '#3fb95022',
 };
 
-type VideoVoicePreset =
-  | 'obama'
-  | 'reagan'
-  | 'lincoln'
-  | 'trump'
-  | 'arnold'
-  | 'stallone'
-  | 'freeman'
-  | 'oprah'
-  | 'samuel';
-
-type VideoTone = 'official' | 'neutral' | 'funny';
-
-const VIDEO_VOICES: Array<{ id: VideoVoicePreset; label: string }> = [
-  { id: 'obama', label: 'President Obama' },
-  { id: 'reagan', label: 'President Reagan' },
-  { id: 'lincoln', label: 'President Lincoln' },
-  { id: 'trump', label: 'Donald Trump' },
-  { id: 'arnold', label: 'Arnold Schwarzenegger' },
-  { id: 'stallone', label: 'Sylvester Stallone' },
-  { id: 'freeman', label: 'Morgan Freeman' },
-  { id: 'oprah', label: 'Oprah Winfrey' },
-  { id: 'samuel', label: 'Samuel L. Jackson' },
-];
-
-const VIDEO_TONES: Array<{ id: VideoTone; label: string }> = [
-  { id: 'official', label: 'Serious official' },
-  { id: 'neutral', label: 'Neutral analyst' },
-  { id: 'funny', label: 'Funny' },
-];
-const MAX_VIDEO_SLIDE_SECONDS = 30;
 
 /** Presidential Daily Brief section structure from `Presidental Daily Brief`. */
 const THEMES: Array<{
@@ -159,88 +128,41 @@ const THEMES: Array<{
   },
 ];
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => window.setTimeout(resolve, ms));
-}
-
-function buildNarrationText(
-  section: BriefSection,
-  idx: number,
-  total: number,
-  tone: VideoTone,
-  allowProfanity: boolean,
-): string {
-  const key = section.keyPoints.slice(0, 2).join(' ');
-  const base = `Slide ${idx + 1} of ${total}. ${section.title}. ${section.summary} ${key}`;
-  if (tone === 'official') {
-    return `${base} Maintain focus on indicators in ${section.regions.slice(0, 2).join(' and ')}.`;
-  }
-  if (tone === 'funny') {
-    const cuss = allowProfanity ? ' The situation is messy as hell, so keep your eyes open.' : '';
-    return `${base} Short version: this is serious, but we can still keep our sense of humor.${cuss}`;
-  }
-  return `${base} Watch for escalation indicators over the next 48 hours.`;
-}
-
-function drawVideoSlide(
-  ctx: CanvasRenderingContext2D,
-  section: BriefSection,
-  index: number,
-  total: number,
-): void {
-  const W = ctx.canvas.width;
-  const H = ctx.canvas.height;
-  ctx.clearRect(0, 0, W, H);
-  ctx.fillStyle = '#060b16';
-  ctx.fillRect(0, 0, W, H);
-  ctx.fillStyle = '#3fb950';
-  ctx.fillRect(0, 0, W, 10);
-  ctx.fillStyle = '#f85149';
-  ctx.fillRect(0, 14, W, 40);
-  ctx.fillStyle = '#ffffff';
-  ctx.font = 'bold 20px Inter, system-ui, sans-serif';
-  ctx.fillText('PRESIDENTIAL DAILY BRIEF — VIDEO', 36, 41);
-
-  ctx.fillStyle = '#3fb950';
-  ctx.font = 'bold 36px Inter, system-ui, sans-serif';
-  ctx.fillText(section.title.toUpperCase(), 40, 122);
-
-  ctx.fillStyle = '#8b949e';
-  ctx.font = '18px Inter, system-ui, sans-serif';
-  ctx.fillText(`Slide ${index + 1}/${total} · ${section.eventCount} events`, 42, 154);
-  ctx.fillText(section.regions.slice(0, 4).join(' · '), 42, 182);
-
-  ctx.fillStyle = '#111827';
-  ctx.fillRect(36, 212, W - 72, 420);
-  ctx.strokeStyle = '#30363d';
-  ctx.lineWidth = 2;
-  ctx.strokeRect(36, 212, W - 72, 420);
-
-  ctx.fillStyle = '#e6edf3';
-  ctx.font = 'bold 24px Inter, system-ui, sans-serif';
-  ctx.fillText('Executive Summary', 58, 256);
-
-  ctx.font = '20px Inter, system-ui, sans-serif';
-  const wrapped = section.summary.match(/.{1,95}(\s|$)/g) ?? [section.summary];
-  wrapped.slice(0, 8).forEach((line, i) => {
-    ctx.fillText(line.trim(), 58, 296 + i * 34);
-  });
-
-  ctx.fillStyle = '#58a6ff';
-  ctx.font = 'bold 20px Inter, system-ui, sans-serif';
-  ctx.fillText('Top Indicators:', 58, 540);
-  ctx.fillStyle = '#c9d1d9';
-  ctx.font = '18px Inter, system-ui, sans-serif';
-  section.indicators.slice(0, 2).forEach((line, i) => {
-    ctx.fillText(`• ${line}`, 58, 574 + i * 30);
-  });
-}
-
 type SectionState =
   | { kind: 'idle' }
   | { kind: 'loading' }
   | { kind: 'ready'; section: BriefSection }
   | { kind: 'error'; reason: string; hint?: string };
+
+const PDB_STORAGE_KEY = 'pdb:lastGeneratedSections:v1';
+
+function readStoredPdbSections(): Record<string, SectionState> {
+  if (typeof window === 'undefined') return {};
+  try {
+    const raw = window.localStorage.getItem(PDB_STORAGE_KEY);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, SectionState> = {};
+    for (const theme of THEMES) {
+      const candidate = parsed[theme.id] as
+        | { kind?: unknown; section?: unknown; reason?: unknown; hint?: unknown }
+        | undefined;
+      if (!candidate || typeof candidate !== 'object') continue;
+      if (candidate.kind === 'ready' && candidate.section && typeof candidate.section === 'object') {
+        out[theme.id] = { kind: 'ready', section: candidate.section as BriefSection };
+      } else if (candidate.kind === 'error') {
+        out[theme.id] = {
+          kind: 'error',
+          reason: typeof candidate.reason === 'string' ? candidate.reason : 'Error',
+          hint: typeof candidate.hint === 'string' ? candidate.hint : undefined,
+        };
+      }
+    }
+    return out;
+  } catch {
+    return {};
+  }
+}
 
 export default function BriefingPanel() {
   const { showBriefing, setShowBriefing } = useStore();
@@ -253,17 +175,11 @@ export default function BriefingPanel() {
       day: 'numeric',
     });
   });
-  const [sectionStates, setSectionStates] = useState<Record<string, SectionState>>({});
+  const [sectionStates, setSectionStates] = useState<Record<string, SectionState>>(() =>
+    readStoredPdbSections(),
+  );
   const [activeSection, setActiveSection] = useState<string>(THEMES[0].id);
   const [isExporting, setIsExporting] = useState(false);
-  const [videoVoice, setVideoVoice] = useState<VideoVoicePreset>('obama');
-  const [videoTone, setVideoTone] = useState<VideoTone>('official');
-  const [allowCursing, setAllowCursing] = useState(false);
-  const [isGeneratingVideo, setIsGeneratingVideo] = useState(false);
-  const [videoProgressPct, setVideoProgressPct] = useState(0);
-  const [videoStatus, setVideoStatus] = useState('');
-  const [generatedVideoUrl, setGeneratedVideoUrl] = useState<string | null>(null);
-  const [generatedVideoFilename, setGeneratedVideoFilename] = useState<string>('');
   const [isGeneratingBrief, setIsGeneratingBrief] = useState(false);
   const [briefStatus, setBriefStatus] = useState('Idle');
   const [analysisProgressPct, setAnalysisProgressPct] = useState(0);
@@ -278,9 +194,22 @@ export default function BriefingPanel() {
       progressTimersRef.current.forEach((t) => window.clearInterval(t));
       activeControllersRef.current = [];
       progressTimersRef.current = [];
-      if (generatedVideoUrl) URL.revokeObjectURL(generatedVideoUrl);
     };
-  }, [generatedVideoUrl]);
+  }, []);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const persistable = Object.fromEntries(
+      Object.entries(sectionStates).filter(([_, s]) => s.kind === 'ready' || s.kind === 'error'),
+    );
+    if (Object.keys(persistable).length === 0) return;
+    try {
+      window.localStorage.setItem(PDB_STORAGE_KEY, JSON.stringify(persistable));
+      generatedForRef.current = true;
+    } catch {
+      // Ignore storage failures (quota/private mode).
+    }
+  }, [sectionStates]);
 
   if (!showBriefing) return null;
 
@@ -476,143 +405,6 @@ export default function BriefingPanel() {
     }
   };
 
-  const createNarratedVideo = async () => {
-    if (readySections.length === 0 || isAnalyzing) return;
-    if (generatedVideoUrl) {
-      URL.revokeObjectURL(generatedVideoUrl);
-      setGeneratedVideoUrl(null);
-      setGeneratedVideoFilename('');
-    }
-    setIsGeneratingVideo(true);
-    setVideoProgressPct(0);
-    setVideoStatus('Preparing slides…');
-    try {
-      const canvas = document.createElement('canvas');
-      canvas.width = 1280;
-      canvas.height = 720;
-      const ctx = canvas.getContext('2d');
-      if (!ctx) throw new Error('Canvas context unavailable');
-
-      const audioContext = new AudioContext();
-      const audioDestination = audioContext.createMediaStreamDestination();
-      await audioContext.resume();
-
-      const videoStream = canvas.captureStream(30);
-      const mixedStream = new MediaStream([
-        ...videoStream.getVideoTracks(),
-        ...audioDestination.stream.getAudioTracks(),
-      ]);
-      const mimeType =
-        [
-          'video/webm;codecs=vp9,opus',
-          'video/webm;codecs=vp8,opus',
-          'video/webm',
-        ].find((m) => MediaRecorder.isTypeSupported(m)) || 'video/webm';
-
-      const chunks: BlobPart[] = [];
-      const recorder = new MediaRecorder(mixedStream, {
-        mimeType,
-        videoBitsPerSecond: 4_000_000,
-      });
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunks.push(e.data);
-      };
-      recorder.start();
-
-      for (let i = 0; i < readySections.length; i++) {
-        const section = readySections[i].section;
-        setVideoStatus(`Generating narration ${i + 1}/${readySections.length}: ${section.title}`);
-        drawVideoSlide(ctx, section, i, readySections.length);
-        await sleep(350);
-
-        const narrationText = buildNarrationText(
-          section,
-          i,
-          readySections.length,
-          videoTone,
-          allowCursing,
-        );
-        const ttsRes = await fetch('/api/briefing/video-tts', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            text: narrationText,
-            voicePreset: videoVoice,
-            tone: videoTone,
-          }),
-        });
-        if (!ttsRes.ok) {
-          const info = await ttsRes.json().catch(() => null as unknown);
-          const reason =
-            info && typeof info === 'object' && 'reason' in info
-              ? String((info as { reason?: unknown }).reason ?? 'TTS failed')
-              : `TTS failed (${ttsRes.status})`;
-          throw new Error(reason);
-        }
-
-        const arr = await ttsRes.arrayBuffer();
-        const audioBuf = await audioContext.decodeAudioData(arr.slice(0));
-        const src = audioContext.createBufferSource();
-        src.buffer = audioBuf;
-        src.connect(audioDestination);
-        src.start();
-        // Hard cap per-slide narration length.
-        const maxSlideMs = MAX_VIDEO_SLIDE_SECONDS * 1000;
-        const effectiveMs = Math.min(maxSlideMs, Math.round(audioBuf.duration * 1000));
-        if (audioBuf.duration * 1000 > maxSlideMs) {
-          src.stop(audioContext.currentTime + MAX_VIDEO_SLIDE_SECONDS);
-        }
-        await new Promise<void>((resolve) => {
-          let settled = false;
-          const finish = () => {
-            if (settled) return;
-            settled = true;
-            window.clearTimeout(timeout);
-            resolve();
-          };
-          const timeout = window.setTimeout(() => finish(), effectiveMs + 50);
-          src.onended = () => {
-            finish();
-          };
-        });
-        setVideoProgressPct(Math.round(((i + 1) / readySections.length) * 100));
-        await sleep(300);
-      }
-
-      setVideoStatus('Finalizing video…');
-      await sleep(200);
-      await new Promise<void>((resolve) => {
-        recorder.onstop = () => resolve();
-        recorder.stop();
-      });
-      mixedStream.getTracks().forEach((t) => t.stop());
-      await audioContext.close();
-
-      const blob = new Blob(chunks, { type: mimeType });
-      const url = URL.createObjectURL(blob);
-      const filename = `PDB_Video_${new Date().toISOString().slice(0, 10)}.webm`;
-      setGeneratedVideoUrl(url);
-      setGeneratedVideoFilename(filename);
-      setVideoStatus('Video ready. Click Download Video.');
-      setVideoProgressPct(100);
-    } catch (err) {
-      console.error('Video generation failed:', err);
-      setVideoStatus(`Video generation failed: ${(err as Error).message || 'unknown error'}`);
-    } finally {
-      setTimeout(() => {
-        setIsGeneratingVideo(false);
-      }, 300);
-    }
-  };
-
-  const downloadGeneratedVideo = () => {
-    if (!generatedVideoUrl) return;
-    const a = document.createElement('a');
-    a.href = generatedVideoUrl;
-    a.download = generatedVideoFilename || `PDB_Video_${new Date().toISOString().slice(0, 10)}.webm`;
-    a.click();
-  };
-
   return (
     <div
       style={{
@@ -760,112 +552,6 @@ export default function BriefingPanel() {
             >
               {isGeneratingBrief ? 'Preparing Brief…' : 'Generate Brief'}
             </button>
-            <div style={{ display: 'flex', gap: 8, alignItems: 'flex-end', flexWrap: 'wrap' }}>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ color: '#8b949e', fontSize: 10, fontWeight: 700 }}>Video Briefer</span>
-                <select
-                  value={videoVoice}
-                  onChange={(e) => setVideoVoice(e.target.value as VideoVoicePreset)}
-                  disabled={isGeneratingVideo}
-                  style={{
-                    background: '#161b22',
-                    border: '1px solid #30363d',
-                    borderRadius: 6,
-                    color: '#c9d1d9',
-                    fontSize: 12,
-                    padding: '7px 8px',
-                  }}
-                >
-                  {VIDEO_VOICES.map((v) => (
-                    <option key={v.id} value={v.id}>
-                      {v.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <span style={{ color: '#8b949e', fontSize: 10, fontWeight: 700 }}>Video Tone</span>
-                <select
-                  value={videoTone}
-                  onChange={(e) => setVideoTone(e.target.value as VideoTone)}
-                  disabled={isGeneratingVideo}
-                  style={{
-                    background: '#161b22',
-                    border: '1px solid #30363d',
-                    borderRadius: 6,
-                    color: '#c9d1d9',
-                    fontSize: 12,
-                    padding: '7px 8px',
-                  }}
-                >
-                  {VIDEO_TONES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
-              </label>
-              <label
-                style={{
-                  color: '#8b949e',
-                  fontSize: 11,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 5,
-                  userSelect: 'none',
-                }}
-              >
-                <input
-                  type="checkbox"
-                  checked={allowCursing}
-                  onChange={(e) => setAllowCursing(e.target.checked)}
-                  disabled={isGeneratingVideo}
-                />
-                Allow cursing
-              </label>
-            </div>
-            <button
-              data-testid="briefing-generate-video"
-              onClick={createNarratedVideo}
-              disabled={isGeneratingVideo || readySections.length === 0 || isGeneratingBrief}
-              style={{
-                background:
-                  isGeneratingVideo || readySections.length === 0 || isGeneratingBrief
-                    ? '#1c2333'
-                    : '#6e40c9',
-                border: '1px solid #8957e5',
-                borderRadius: 6,
-                padding: '8px 14px',
-                color: '#fff',
-                fontWeight: 600,
-                fontSize: 12,
-                cursor:
-                  isGeneratingVideo || readySections.length === 0 || isGeneratingBrief
-                    ? 'not-allowed'
-                    : 'pointer',
-                opacity: isGeneratingVideo || readySections.length === 0 || isGeneratingBrief ? 0.55 : 1,
-              }}
-            >
-              {isGeneratingVideo ? `Creating Video… ${videoProgressPct}%` : 'Create Video Brief'}
-            </button>
-            <button
-              data-testid="briefing-download-video"
-              onClick={downloadGeneratedVideo}
-              disabled={!generatedVideoUrl || isGeneratingVideo}
-              style={{
-                background: !generatedVideoUrl || isGeneratingVideo ? '#1c2333' : '#0f6fca',
-                border: '1px solid #58a6ff',
-                borderRadius: 6,
-                padding: '8px 14px',
-                color: '#fff',
-                fontWeight: 600,
-                fontSize: 12,
-                cursor: !generatedVideoUrl || isGeneratingVideo ? 'not-allowed' : 'pointer',
-                opacity: !generatedVideoUrl || isGeneratingVideo ? 0.55 : 1,
-              }}
-            >
-              Download Video
-            </button>
             <button
               data-testid="briefing-export-pdf"
               onClick={exportPDF}
@@ -905,48 +591,6 @@ export default function BriefingPanel() {
             </button>
           </div>
         </div>
-
-        {(isGeneratingVideo || videoStatus) && (
-          <div
-            style={{
-              padding: '10px 18px',
-              borderBottom: '1px solid #21262d',
-              background: '#0f1728',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                fontSize: 12,
-                color: '#8b949e',
-                marginBottom: 6,
-              }}
-            >
-              <span>{videoStatus || 'Preparing video...'}</span>
-              <span>{videoProgressPct}%</span>
-            </div>
-            <div
-              style={{
-                height: 8,
-                borderRadius: 999,
-                background: '#161b22',
-                overflow: 'hidden',
-                border: '1px solid #30363d',
-              }}
-            >
-              <div
-                style={{
-                  width: `${videoProgressPct}%`,
-                  height: '100%',
-                  background: 'linear-gradient(90deg, #8957e5, #58a6ff)',
-                  transition: 'width 200ms ease',
-                }}
-              />
-            </div>
-          </div>
-        )}
 
         {/* Body */}
         <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>

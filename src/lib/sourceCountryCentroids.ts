@@ -120,16 +120,3 @@ export function coordsForSourceCountry(name: unknown): { lat: number; lng: numbe
   if (typeof name !== "string" || !name.trim()) return null;
   return SOURCE_COUNTRY_CENTROIDS[name.trim()] ?? null;
 }
-
-export function jitterLatLng(seed: string, lat: number, lng: number): { lat: number; lng: number } {
-  let h = 2166136261;
-  for (let i = 0; i < seed.length; i++) {
-    h ^= seed.charCodeAt(i);
-    h = Math.imul(h, 16777619);
-  }
-  const u = (h & 0xffff) / 0xffff;
-  const v = ((h >>> 16) & 0xffff) / 0xffff;
-  const r = 0.25 + u * 0.9;
-  const t = v * Math.PI * 2;
-  return { lat: lat + Math.cos(t) * r * 0.35, lng: lng + Math.sin(t) * r * 0.45 };
-}

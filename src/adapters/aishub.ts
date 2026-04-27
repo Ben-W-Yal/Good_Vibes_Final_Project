@@ -69,6 +69,8 @@ function normalizeRow(row: AishubRow): Ship | null {
     name,
     flag: (row.COUNTRY || "Unknown").trim() || "Unknown",
     type: typeCode == null ? "AIS vessel" : `AIS type ${typeCode}`,
+    mmsi,
+    vesselClass: typeCode == null ? undefined : `AIS type ${typeCode}`,
     lat,
     lng,
     speed,
@@ -84,6 +86,14 @@ function normalizeRow(row: AishubRow): Ship | null {
 
 function unpackRows(payload: unknown): AishubRow[] {
   if (Array.isArray(payload)) {
+    const first = payload[0];
+    if (first && typeof first === "object" && "ERROR" in first) {
+      const message =
+        typeof (first as { ERROR_MESSAGE?: unknown }).ERROR_MESSAGE === "string"
+          ? (first as { ERROR_MESSAGE: string }).ERROR_MESSAGE
+          : "AISHub returned an error";
+      throw new Error(message);
+    }
     // Typical shape: [meta, [rows...]]
     if (payload.length >= 2 && Array.isArray(payload[1])) {
       return payload[1].map((r) => shipRowSchema.parse(r));

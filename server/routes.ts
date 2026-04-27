@@ -6,21 +6,179 @@ import { liveuamapAdapter } from '../src/adapters/liveuamap';
 import { perigonAdapter } from '../src/adapters/perigon';
 import { thenewsapiAdapter } from '../src/adapters/thenewsapi';
 import { acledAdapter } from '../src/adapters/acled';
+import { getAcledDebugInfo } from '../src/adapters/acled';
 import { gdeltAdapter } from '../src/adapters/gdelt';
 import { fetchOpenSkyAircraft } from '../src/adapters/opensky';
 import { fetchAirplanesLiveAircraft } from '../src/adapters/airplanesLive';
 import { fetchAishubShips } from '../src/adapters/aishub';
+import { fetchAisstreamShips } from '../src/adapters/aisstream';
+import { fetchMarineTrafficShips } from '../src/adapters/marinetraffic';
+import { fetchLiveSatellites } from '../src/adapters/satellites';
 import {
   aircraftHexFromId,
   fetchFlightradar24Aircraft,
   flightradar24Enabled,
 } from '../src/adapters/flightradar24';
 import type { GlobeEntity } from '../src/types/globe';
-import type { Aircraft, Ship } from '../client/src/data/trackers';
+import type { Aircraft, Ship, Satellite } from '../client/src/data/trackers';
 
 type AnyRecord = Record<string, unknown>;
 
 const DATA_DIR = path.resolve(process.cwd(), 'server/data');
+const GDELT_CACHE_FILE = path.join(DATA_DIR, 'gdelt-cache.json');
+const GDELT_CACHE_TTL_MS = 15 * 60_000;
+const GDELT_STALE_FALLBACK_MS = 6 * 60 * 60_000;
+const GDELT_ROUTE_FETCH_TIMEOUT_MS = 50_000;
+const GDELT_ROUTE_MAX_LIMIT = Math.min(
+  1000,
+  Math.max(50, Number(process.env.GDELT_MAX_ROWS ?? 300) || 300),
+);
+const GDELT_ROUTE_MAX_TIMESPAN_DAYS = Math.min(
+  90,
+  Math.max(7, Number(process.env.GDELT_MAX_TIMESPAN_DAYS ?? 30) || 30),
+);
+const ACLED_ROUTE_MAX_LIMIT = Math.min(
+  100_000,
+  Math.max(5_000, Number(process.env.ACLED_MAX_ROWS ?? 50_000) || 50_000),
+);
+const gdeltRouteCache = new Map<string, { rows: GlobeEntity[]; updatedAtMs: number }>();
+const gdeltInFlight = new Map<string, Promise<GlobeEntity[]>>();
+const SATELLITE_INTEL_CACHE_TTL_MS = 6 * 60 * 60_000;
+const satelliteIntelCache = new Map<string, { payload: SatelliteIntelPayload; updatedAtMs: number }>();
+const TRACKER_INTEL_CACHE_TTL_MS = 6 * 60 * 60_000;
+const trackerIntelCache = new Map<string, { payload: TrackerIntelPayload; updatedAtMs: number }>();
+
+type GdeltRouteQuery = {
+  region?: string;
+  from?: string;
+  to?: string;
+  languages?: string[];
+  conflictNews?: boolean;
+  limit?: number;
+};
+
+type SatelliteIntelPayload = {
+  summary: string;
+  country?: string;
+  operator?: string;
+  launchDate?: string;
+  launchVehicle?: string;
+  launchSite?: string;
+  yearsInOrbit?: string;
+  purpose?: string;
+  orbit?: string;
+  confidence?: string;
+  sources: { title: string; url: string }[];
+  generatedAt: string;
+  model?: string;
+};
+
+type TrackerIntelPayload = {
+  summary: string;
+  airline?: string;
+  operator?: string;
+  country?: string;
+  registration?: string;
+  modelOrClass?: string;
+  origin?: string;
+  destination?: string;
+  scheduledDeparture?: string;
+  scheduledArrival?: string;
+  flightStatus?: string;
+  role?: string;
+  owner?: string;
+  flag?: string;
+  built?: string;
+  confidence?: string;
+  sources: { title: string; url: string }[];
+  generatedAt: string;
+  model?: string;
+};
+
+function gdeltSpanHours(from?: string, to?: string): number {
+  const toT = to ? new Date(to).getTime() : Date.now();
+  const fromT = from ? new Date(from).getTime() : Date.now() - 24 * 3_600_000;
+  if (!Number.isFinite(toT) || !Number.isFinite(fromT) || toT <= fromT) return 24;
+  const hours = Math.ceil((toT - fromT) / 3_600_000);
+  return Math.max(1, Math.min(24 * GDELT_ROUTE_MAX_TIMESPAN_DAYS, hours));
+}
+
+function gdeltCacheKey(query: GdeltRouteQuery): string {
+  const region = (query.region ?? 'global').trim().toLowerCase() || 'global';
+  const languages =
+    query.languages === undefined
+      ? 'def:en'
+      : query.languages.length === 0
+        ? 'all'
+        : query.languages.slice().sort().join(',');
+  const span = gdeltSpanHours(query.from, query.to);
+  const conflict = query.conflictNews === false ? 'c0' : 'c1';
+  return `gdelt-route:${region}:h${span}:${languages}:${conflict}`;
+}
+
+async function loadGdeltRouteCacheFromDisk(): Promise<void> {
+  try {
+    const txt = await fs.readFile(GDELT_CACHE_FILE, 'utf8');
+    const parsed = JSON.parse(txt) as {
+      entries?: Array<{ key: string; updatedAtMs: number; rows: GlobeEntity[] }>;
+    };
+    const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+    const now = Date.now();
+    for (const e of entries) {
+      if (!e || typeof e.key !== 'string' || !Array.isArray(e.rows)) continue;
+      if (!Number.isFinite(e.updatedAtMs)) continue;
+      if (now - e.updatedAtMs > GDELT_STALE_FALLBACK_MS) continue;
+      gdeltRouteCache.set(e.key, { rows: e.rows, updatedAtMs: e.updatedAtMs });
+    }
+  } catch {
+    // first boot/no cache file
+  }
+}
+
+async function persistGdeltRouteCacheToDisk(): Promise<void> {
+  try {
+    await fs.mkdir(DATA_DIR, { recursive: true });
+    const entries = Array.from(gdeltRouteCache.entries())
+      .sort((a, b) => b[1].updatedAtMs - a[1].updatedAtMs)
+      .slice(0, 30)
+      .map(([key, v]) => ({ key, updatedAtMs: v.updatedAtMs, rows: v.rows.slice(0, GDELT_ROUTE_MAX_LIMIT) }));
+    await fs.writeFile(GDELT_CACHE_FILE, JSON.stringify({ entries }), 'utf8');
+  } catch (e) {
+    console.warn('[gdelt-cache] failed to persist cache file:', e);
+  }
+}
+
+async function fetchAndCacheGdelt(query: GdeltRouteQuery): Promise<GlobeEntity[]> {
+  const key = gdeltCacheKey(query);
+  const existing = gdeltInFlight.get(key);
+  if (existing) return existing;
+
+  const task = (async () => {
+    const rows = await Promise.race([
+      gdeltAdapter.fetch({
+        region: query.region,
+        from: query.from,
+        to: query.to,
+        limit: query.limit,
+        languages: query.languages,
+        conflictNews: query.conflictNews,
+      }),
+      new Promise<GlobeEntity[]>((_, reject) =>
+        setTimeout(() => reject(new Error('GDELT route fetch timeout')), GDELT_ROUTE_FETCH_TIMEOUT_MS),
+      ),
+    ]);
+    gdeltRouteCache.set(key, { rows, updatedAtMs: Date.now() });
+    await persistGdeltRouteCacheToDisk();
+    return rows;
+  })();
+
+  gdeltInFlight.set(key, task);
+  try {
+    return await task;
+  } finally {
+    gdeltInFlight.delete(key);
+  }
+}
 
 /**
  * Look up the Gemini API key under any of the common env-var names we have seen in
@@ -110,6 +268,101 @@ function tryParseBriefingJson(raw: string): unknown | null {
     }
   }
   return null;
+}
+
+function extractNoradId(id?: string): string {
+  const match = String(id ?? '').match(/\d{1,6}/);
+  return match?.[0] ?? '';
+}
+
+function sanitizeSatelliteSources(
+  rawSources: unknown,
+  groundingChunks?: { web?: { uri?: string; title?: string } }[],
+): { title: string; url: string }[] {
+  const byUrl = new Map<string, { title: string; url: string }>();
+  const add = (title?: unknown, url?: unknown) => {
+    if (typeof url !== 'string' || !/^https?:\/\//i.test(url)) return;
+    const cleanedTitle =
+      typeof title === 'string' && title.trim()
+        ? title.trim().slice(0, 140)
+        : new URL(url).hostname.replace(/^www\./, '');
+    byUrl.set(url, { title: cleanedTitle, url });
+  };
+
+  if (Array.isArray(rawSources)) {
+    for (const source of rawSources) {
+      if (!source || typeof source !== 'object') continue;
+      const s = source as { title?: unknown; url?: unknown };
+      add(s.title, s.url);
+    }
+  }
+
+  for (const chunk of groundingChunks ?? []) {
+    add(chunk.web?.title, chunk.web?.uri);
+  }
+
+  return Array.from(byUrl.values()).slice(0, 6);
+}
+
+function fallbackSatelliteIntel(sat: Satellite, model?: string): SatelliteIntelPayload {
+  const norad = extractNoradId(sat.id);
+  return {
+    summary:
+      `${sat.name} is currently tracked from public TLE data as NORAD catalog ${norad || sat.id}. ` +
+      `The app can propagate its current position and orbit, but the AI web lookup did not return a parseable open-source dossier for this request.`,
+    country: sat.country,
+    operator: sat.country && sat.country !== 'Unknown' ? `${sat.country} operator` : undefined,
+    launchVehicle: undefined,
+    launchSite: undefined,
+    purpose: sat.category,
+    orbit: sat.orbit,
+    confidence: 'low',
+    sources: sat.sourceUrl ? [{ title: sat.source, url: sat.sourceUrl }] : [],
+    generatedAt: new Date().toISOString(),
+    model,
+  };
+}
+
+function fallbackTrackerIntel(
+  kind: 'aircraft' | 'ships',
+  tracker: Aircraft | Ship,
+  model?: string,
+): TrackerIntelPayload {
+  if (kind === 'aircraft') {
+    const aircraft = tracker as Aircraft;
+    return {
+      summary:
+        `${aircraft.callsign} is shown from the live tracker feed as a ${aircraft.category} aircraft, ` +
+        `reported as type ${aircraft.type} and associated with ${aircraft.country || 'an unknown country'}. ` +
+        `The AI web lookup did not return a parseable open-source dossier for this request.`,
+      operator: aircraft.carrier,
+      country: aircraft.country,
+      modelOrClass: aircraft.type,
+      origin: undefined,
+      destination: undefined,
+      flightStatus: undefined,
+      role: aircraft.category,
+      confidence: 'low',
+      sources: aircraft.sourceUrl ? [{ title: aircraft.source, url: aircraft.sourceUrl }] : [],
+      generatedAt: new Date().toISOString(),
+      model,
+    };
+  }
+
+  const ship = tracker as Ship;
+  return {
+    summary:
+      `${ship.name} is shown from the live tracker feed as a ${ship.category} ${ship.type} vessel ` +
+      `flagged to ${ship.flag || 'an unknown flag state'}. The AI web lookup did not return a parseable open-source dossier for this request.`,
+    country: ship.flag,
+    flag: ship.flag,
+    modelOrClass: ship.type,
+    role: ship.category,
+    confidence: 'low',
+    sources: ship.sourceUrl ? [{ title: ship.source, url: ship.sourceUrl }] : [],
+    generatedAt: new Date().toISOString(),
+    model,
+  };
 }
 
 /** Convert raw Gemini error blob (string or JSON) into a short, human-readable line. */
@@ -291,6 +544,12 @@ function isFiniteNumber(value: unknown): value is number {
   return typeof value === 'number' && Number.isFinite(value);
 }
 
+function parseIsoDateSafe(v: unknown): number | null {
+  if (typeof v !== 'string' || !v.trim()) return null;
+  const t = new Date(v).getTime();
+  return Number.isFinite(t) ? t : null;
+}
+
 function hasValidSource(value: unknown): boolean {
   if (!isRecord(value)) return false;
   return (
@@ -324,6 +583,152 @@ async function readJsonArraySafe(filename: string): Promise<unknown[]> {
   } catch {
     return [];
   }
+}
+
+function parseCsvLine(line: string): string[] {
+  const out: string[] = [];
+  let cur = '';
+  let i = 0;
+  let inQuotes = false;
+  while (i < line.length) {
+    const ch = line[i];
+    if (inQuotes) {
+      if (ch === '"') {
+        if (line[i + 1] === '"') {
+          cur += '"';
+          i += 2;
+          continue;
+        }
+        inQuotes = false;
+        i += 1;
+        continue;
+      }
+      cur += ch;
+      i += 1;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = true;
+      i += 1;
+      continue;
+    }
+    if (ch === ',') {
+      out.push(cur);
+      cur = '';
+      i += 1;
+      continue;
+    }
+    cur += ch;
+    i += 1;
+  }
+  out.push(cur);
+  return out.map((v) => v.trim());
+}
+
+function csvToRecords(csv: string): Record<string, string>[] {
+  const lines = csv
+    .split(/\r?\n/)
+    .map((l) => l.trimEnd())
+    .filter((l) => l.length > 0);
+  if (lines.length < 2) return [];
+  const headers = parseCsvLine(lines[0]);
+  const out: Record<string, string>[] = [];
+  for (let i = 1; i < lines.length; i++) {
+    const cols = parseCsvLine(lines[i]);
+    const row: Record<string, string> = {};
+    for (let j = 0; j < headers.length; j++) row[headers[j]] = cols[j] ?? '';
+    out.push(row);
+  }
+  return out;
+}
+
+function acledRowToGlobeEntity(row: Record<string, unknown>): GlobeEntity | null {
+  const idRaw = row.event_id_cnty ?? row.event_id_no_cnty ?? row.event_id;
+  const id = typeof idRaw === 'string' && idRaw.trim() ? idRaw.trim() : null;
+  const lat = Number(row.latitude);
+  const lon = Number(row.longitude);
+  if (!id || !Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+  const eventDate =
+    typeof row.event_date === 'string' && row.event_date.trim() ? row.event_date.trim() : null;
+  const iso = eventDate ? `${eventDate}T23:59:59.999Z` : new Date().toISOString();
+  const notes = typeof row.notes === 'string' ? row.notes : '';
+  const subEventType =
+    typeof row.sub_event_type === 'string'
+      ? row.sub_event_type
+      : typeof row.event_type === 'string'
+        ? row.event_type
+        : 'Event';
+  return {
+    id,
+    source: 'acled',
+    category: 'conflict',
+    subcategory: subEventType,
+    label: notes.slice(0, 140) || subEventType,
+    lat,
+    lon,
+    timestamp: iso,
+    confidence: 0.6,
+    metadata: {
+      notes,
+      country: typeof row.country === 'string' ? row.country : undefined,
+      location: typeof row.location === 'string' ? row.location : undefined,
+      event_type: typeof row.event_type === 'string' ? row.event_type : undefined,
+      sub_event_type: typeof row.sub_event_type === 'string' ? row.sub_event_type : undefined,
+      actor1: typeof row.actor1 === 'string' ? row.actor1 : undefined,
+      actor2: typeof row.actor2 === 'string' ? row.actor2 : undefined,
+      fatalities: Number.isFinite(Number(row.fatalities)) ? Number(row.fatalities) : 0,
+      region: typeof row.region === 'string' ? row.region : undefined,
+      sourceUrl: 'https://acleddata.com/conflict-data/download-data-files',
+    },
+  };
+}
+
+async function loadAcledFileFallback(
+  fromIso?: string,
+  toIso?: string,
+): Promise<GlobeEntity[]> {
+  const candidates = [
+    path.join(DATA_DIR, 'acled-export.json'),
+    path.join(DATA_DIR, 'acled-download.json'),
+    path.join(DATA_DIR, 'acled-export.csv'),
+    path.join(DATA_DIR, 'acled-download.csv'),
+  ];
+  let rows: Record<string, unknown>[] = [];
+  for (const p of candidates) {
+    try {
+      const txt = await fs.readFile(p, 'utf8');
+      if (p.endsWith('.json')) {
+        const raw = JSON.parse(txt);
+        if (Array.isArray(raw)) {
+          rows = raw.filter((r): r is Record<string, unknown> => !!r && typeof r === 'object');
+        } else if (raw && typeof raw === 'object' && Array.isArray((raw as { data?: unknown[] }).data)) {
+          rows = (raw as { data: unknown[] }).data.filter(
+            (r): r is Record<string, unknown> => !!r && typeof r === 'object',
+          );
+        }
+      } else {
+        rows = csvToRecords(txt);
+      }
+      if (rows.length > 0) break;
+    } catch {
+      continue;
+    }
+  }
+  if (rows.length === 0) return [];
+  const fromT = fromIso ? new Date(fromIso).getTime() : null;
+  const toT = toIso ? new Date(toIso).getTime() : null;
+  const entities: GlobeEntity[] = [];
+  for (const row of rows) {
+    const ev = acledRowToGlobeEntity(row);
+    if (!ev) continue;
+    const t = parseIsoDateSafe(ev.timestamp);
+    if (t !== null) {
+      if (fromT !== null && Number.isFinite(fromT) && t < fromT) continue;
+      if (toT !== null && Number.isFinite(toT) && t > toT) continue;
+    }
+    entities.push(ev);
+  }
+  return entities;
 }
 
 function isVerifiedEvent(value: unknown): boolean {
@@ -379,7 +784,7 @@ function isVerifiedShip(value: unknown): value is Ship {
   );
 }
 
-function isVerifiedSatellite(value: unknown): boolean {
+function isVerifiedSatellite(value: unknown): value is Satellite {
   if (!isRecord(value)) return false;
   if (!hasValidSource(value) || !hasLatLng(value)) return false;
   return (
@@ -395,6 +800,31 @@ function isVerifiedSatellite(value: unknown): boolean {
 }
 
 export function registerRoutes(httpServer: Server, app: Express) {
+  void loadGdeltRouteCacheFromDisk();
+
+  async function warmGdeltDefaultCache(): Promise<void> {
+    if (!gdeltAdapter.enabled()) return;
+    const nowIso = new Date().toISOString();
+    const fromIso = new Date(Date.now() - 24 * 3_600_000).toISOString();
+    try {
+      await fetchAndCacheGdelt({
+        from: fromIso,
+        to: nowIso,
+        limit: GDELT_ROUTE_MAX_LIMIT,
+        languages: [],
+        conflictNews: false,
+      });
+      console.info('[gdelt-cache] warmed default 24h cache');
+    } catch (e) {
+      console.warn('[gdelt-cache] warm failed:', e);
+    }
+  }
+
+  void warmGdeltDefaultCache();
+  setInterval(() => {
+    void warmGdeltDefaultCache();
+  }, GDELT_CACHE_TTL_MS);
+
   // Health check
   app.get('/api/health', (_req: Request, res: Response) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -409,7 +839,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
   app.get('/api/trackers/aircraft', async (req: Request, res: Response) => {
     const localRows = (await readJsonArraySafe('verified-aircraft.json')).filter(isVerifiedAircraft);
     const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 2000) : 300;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 25_000) : 25_000;
     const bboxRaw = typeof req.query.bbox === 'string' ? req.query.bbox : undefined;
     const bbox = bboxRaw
       ? (bboxRaw.split(',').map(Number) as [number, number, number, number])
@@ -417,7 +847,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
     try {
       let openskyRows: Aircraft[] = [];
       try {
-        openskyRows = await fetchOpenSkyAircraft();
+        openskyRows = await fetchOpenSkyAircraft(bbox);
       } catch (osErr) {
         console.error('OpenSky live feed failed:', osErr);
       }
@@ -431,7 +861,7 @@ export function registerRoutes(httpServer: Server, app: Express) {
       let fr24Rows: Aircraft[] = [];
       if (flightradar24Enabled()) {
         try {
-          fr24Rows = await fetchFlightradar24Aircraft(inView, Math.min(150, limit));
+          fr24Rows = await fetchFlightradar24Aircraft(inView, Math.min(200, limit));
         } catch (frErr) {
           console.error('Flightradar24 live positions failed (check FR24_API_TOKEN & credits):', frErr);
         }
@@ -464,22 +894,36 @@ export function registerRoutes(httpServer: Server, app: Express) {
   app.get('/api/trackers/ships', async (req: Request, res: Response) => {
     const localRows = (await readJsonArraySafe('verified-ships.json')).filter(isVerifiedShip);
     const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 2000) : 500;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 25_000) : 25_000;
     const bboxRaw = typeof req.query.bbox === 'string' ? req.query.bbox : undefined;
     const bbox = bboxRaw
       ? (bboxRaw.split(',').map(Number) as [number, number, number, number])
       : undefined;
 
     try {
+      let aisstreamRows: Ship[] = [];
+      try {
+        aisstreamRows = await fetchAisstreamShips({ bbox });
+      } catch (aisstreamErr) {
+        console.error('AISStream live feed failed:', aisstreamErr);
+      }
       let aishubRows: Ship[] = [];
       try {
         aishubRows = await fetchAishubShips({ bbox });
       } catch (aishubErr) {
         console.error('AISHub live feed failed:', aishubErr);
       }
+      let marineTrafficRows: Ship[] = [];
+      try {
+        marineTrafficRows = await fetchMarineTrafficShips({ bbox });
+      } catch (mtErr) {
+        console.error('MarineTraffic live feed failed:', mtErr);
+      }
 
-      const merged = [...aishubRows, ...localRows].filter((s) => inBbox(s.lat, s.lng, bbox));
-      const deduped = Array.from(new Map(merged.map((s) => [s.id, s] as const)).values());
+      const merged = [...marineTrafficRows, ...aisstreamRows, ...aishubRows, ...localRows].filter((s) => inBbox(s.lat, s.lng, bbox));
+      const deduped = Array.from(
+        new Map(merged.map((s) => [s.mmsi || s.imo || s.id, s] as const)).values(),
+      );
       return res.json(deduped.slice(0, limit));
     } catch (err) {
       console.error('Ship fetch failed, using local verified-ships.json only:', err);
@@ -487,9 +931,352 @@ export function registerRoutes(httpServer: Server, app: Express) {
     }
   });
 
-  app.get('/api/trackers/satellites', async (_req: Request, res: Response) => {
-    const rows = await readJsonArraySafe('verified-satellites.json');
-    res.json(rows.filter(isVerifiedSatellite));
+  app.get('/api/trackers/satellites', async (req: Request, res: Response) => {
+    const localRows = (await readJsonArraySafe('verified-satellites.json')).filter(isVerifiedSatellite);
+    const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
+    const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 2000) : 1000;
+    try {
+      const liveRows = await fetchLiveSatellites(limit);
+      const merged = [...liveRows, ...localRows];
+      const deduped = Array.from(new Map(merged.map((s) => [s.id, s] as const)).values());
+      return res.json(deduped.slice(0, limit));
+    } catch (err) {
+      console.error('Live satellite TLE propagation failed, using local verified-satellites.json only:', err);
+      return res.json(localRows.slice(0, limit));
+    }
+  });
+
+  app.post('/api/trackers/satellites/intel', async (req: Request, res: Response) => {
+    const { satellite, question } = req.body as {
+      satellite?: Satellite;
+      question?: string;
+    };
+
+    if (!satellite || typeof satellite.id !== 'string' || typeof satellite.name !== 'string') {
+      return res.status(400).json({ error: 'satellite payload required' });
+    }
+
+    const norad = extractNoradId(satellite.id);
+    const cleanQuestion = typeof question === 'string' ? question.trim().slice(0, 500) : '';
+    const cacheKey = `${norad || satellite.id}:${cleanQuestion || 'summary'}`;
+    const cached = satelliteIntelCache.get(cacheKey);
+    if (cached && Date.now() - cached.updatedAtMs < SATELLITE_INTEL_CACHE_TTL_MS) {
+      return res.json(cached.payload);
+    }
+
+    const apiKey = resolveGeminiKey();
+    if (!apiKey) {
+      return res.status(503).json({
+        error: 'Satellite AI intel disabled',
+        reason: 'Set GEMINI_API_KEY in .env to enable researched satellite summaries.',
+      });
+    }
+
+    const prompt = [
+      'Research this satellite using Google Search and open-source references.',
+      `Satellite name from live TLE: ${satellite.name}`,
+      `App tracker ID: ${satellite.id}`,
+      norad ? `NORAD catalog number: ${norad}` : '',
+      `Current app category: ${satellite.category}`,
+      `Current app country guess: ${satellite.country}`,
+      `Current app orbit class: ${satellite.orbit}, altitude now: ${satellite.altitude.toFixed(0)} km`,
+      cleanQuestion
+        ? `User question: ${cleanQuestion}`
+        : 'Task: build a concise satellite dossier for the app detail panel.',
+      '',
+      'Return ONLY JSON with this shape:',
+      '{',
+      '  "summary": "4-6 sentence plain-English OSINT summary. Include what it is, who operates it, why it exists, launch context, and notable mission context.",',
+      '  "country": "best open-source country/operator country, or Unknown",',
+      '  "operator": "operator/agency/company if known, or Unknown",',
+      '  "launchDate": "launch date if known, or Unknown",',
+      '  "launchVehicle": "rocket/launch vehicle if known, or Unknown",',
+      '  "launchSite": "launch site/cosmodrome/spaceport if known, or Unknown",',
+      '  "yearsInOrbit": "human-readable duration, or Unknown",',
+      '  "purpose": "mission/use in one sentence",',
+      '  "orbit": "orbit description in one sentence",',
+      '  "confidence": "high | medium | low",',
+      '  "sources": [{ "title": "source title", "url": "https://..." }]',
+      '}',
+      'Rules: Search by NORAD catalog number first, then satellite name. Use N2YO satellite database when available for catalog, launch, country, and category context. Prefer official space agency, CelesTrak, N2YO, NASA/NSSDCA, Gunter, ESA, operator pages, or reputable satellite catalogs. Do not invent launch vehicles or launch sites; return Unknown if not found. Do not invent classified details. If sources conflict, say so in the summary and set confidence medium/low.',
+    ]
+      .filter(Boolean)
+      .join('\n');
+
+    const body = JSON.stringify({
+      systemInstruction: {
+        parts: [
+          {
+            text:
+              'You are an unclassified OSINT space systems analyst. Use Google Search. Return strict JSON only. Be factual, concise, and clear about uncertainty.',
+          },
+        ],
+      },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      tools: [{ googleSearch: {} }],
+      generationConfig: { temperature: 0.25, maxOutputTokens: 2600 },
+    });
+
+    let response: globalThis.Response | null = null;
+    let lastErrorText = '';
+    let lastStatus = 0;
+    let modelUsed = GEMINI_MODEL_FALLBACKS[0];
+
+    try {
+      for (const model of GEMINI_MODEL_FALLBACKS) {
+        const url = `${GEMINI_BASE}/${encodeURIComponent(
+          model,
+        )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const attempt = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        if (attempt.ok) {
+          response = attempt;
+          modelUsed = model;
+          break;
+        }
+        lastStatus = attempt.status;
+        lastErrorText = await attempt.text();
+        console.warn(
+          `[satellite-intel] ${model} returned ${attempt.status}: ${formatGeminiError(lastErrorText)}`,
+        );
+        if (![404, 429, 500, 502, 503, 504].includes(attempt.status)) break;
+      }
+
+      if (!response) {
+        return res.status(lastStatus || 502).json({
+          error: 'Gemini API error',
+          reason: formatGeminiError(lastErrorText),
+        });
+      }
+
+      const data = (await response.json()) as {
+        candidates?: {
+          content?: { parts?: { text?: string }[] };
+          groundingMetadata?: {
+            groundingChunks?: { web?: { uri?: string; title?: string } }[];
+          };
+        }[];
+      };
+      const candidate = data.candidates?.[0];
+      const content = candidate?.content?.parts?.map((p) => p?.text ?? '').join('').trim();
+      const parsed = content ? (tryParseBriefingJson(content) as Partial<SatelliteIntelPayload> | null) : null;
+      const payload: SatelliteIntelPayload = parsed?.summary
+        ? {
+            summary: String(parsed.summary),
+            country: typeof parsed.country === 'string' ? parsed.country : satellite.country,
+            operator: typeof parsed.operator === 'string' ? parsed.operator : undefined,
+            launchDate: typeof parsed.launchDate === 'string' ? parsed.launchDate : undefined,
+            launchVehicle: typeof parsed.launchVehicle === 'string' ? parsed.launchVehicle : undefined,
+            launchSite: typeof parsed.launchSite === 'string' ? parsed.launchSite : undefined,
+            yearsInOrbit: typeof parsed.yearsInOrbit === 'string' ? parsed.yearsInOrbit : undefined,
+            purpose: typeof parsed.purpose === 'string' ? parsed.purpose : undefined,
+            orbit: typeof parsed.orbit === 'string' ? parsed.orbit : undefined,
+            confidence: typeof parsed.confidence === 'string' ? parsed.confidence : undefined,
+            sources: sanitizeSatelliteSources(parsed.sources, candidate?.groundingMetadata?.groundingChunks),
+            generatedAt: new Date().toISOString(),
+            model: modelUsed,
+          }
+        : fallbackSatelliteIntel(satellite, modelUsed);
+
+      if (payload.sources.length === 0 && satellite.sourceUrl) {
+        payload.sources = [{ title: satellite.source, url: satellite.sourceUrl }];
+      }
+      satelliteIntelCache.set(cacheKey, { payload, updatedAtMs: Date.now() });
+      return res.json(payload);
+    } catch (err) {
+      return res.status(500).json({
+        error: 'Satellite intel lookup failed',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  });
+
+  app.post('/api/trackers/intel', async (req: Request, res: Response) => {
+    const { kind, tracker, question } = req.body as {
+      kind?: 'aircraft' | 'ships';
+      tracker?: Aircraft | Ship;
+      question?: string;
+    };
+
+    if ((kind !== 'aircraft' && kind !== 'ships') || !tracker || typeof tracker.id !== 'string') {
+      return res.status(400).json({ error: 'aircraft or ship tracker payload required' });
+    }
+
+    const cleanQuestion = typeof question === 'string' ? question.trim().slice(0, 500) : '';
+    const cacheKey = `${kind}:${tracker.id}:${cleanQuestion || 'summary'}`;
+    const cached = trackerIntelCache.get(cacheKey);
+    if (cached && Date.now() - cached.updatedAtMs < TRACKER_INTEL_CACHE_TTL_MS) {
+      return res.json(cached.payload);
+    }
+
+    const apiKey = resolveGeminiKey();
+    if (!apiKey) {
+      return res.status(503).json({
+        error: 'Tracker AI intel disabled',
+        reason: 'Set GEMINI_API_KEY in .env to enable researched aircraft and ship summaries.',
+      });
+    }
+
+    const target =
+      kind === 'aircraft'
+        ? (() => {
+            const aircraft = tracker as Aircraft;
+            return [
+              'Research this aircraft using Google Search and open-source references.',
+              `Callsign / flight identifier: ${aircraft.callsign}`,
+              `FlightAware candidate URL: https://www.flightaware.com/live/flight/${encodeURIComponent(aircraft.callsign.replace(/\s+/g, ''))}`,
+              `Tracker ID: ${aircraft.id}`,
+              `Reported type/model from feed: ${aircraft.type}`,
+              `Reported country from feed: ${aircraft.country}`,
+              `Reported operator/carrier from feed: ${aircraft.carrier ?? 'Unknown'}`,
+              `Reported category: ${aircraft.category}`,
+              'Search by callsign, ICAO hex/registration if inferable from the tracker ID, aircraft type, operator, and country.',
+              'If this appears to be a civilian airline flight, prioritize FlightAware/FlightRadar-style pages to identify airline, origin, destination, scheduled/actual times, and whether it is on time, delayed, early, landed, or cancelled.',
+              'Prefer FAA/registry data, ADS-B Exchange-style context, airline/operator pages, FlightAware/FlightRadar context, military fact sheets, manufacturer pages, and reputable aviation references.',
+            ];
+          })()
+        : (() => {
+            const ship = tracker as Ship;
+            return [
+              'Research this ship using Google Search and open-source references.',
+              `Vessel name: ${ship.name}`,
+              `Tracker ID: ${ship.id}`,
+              `Reported vessel type from feed: ${ship.type}`,
+              `Reported flag from feed: ${ship.flag}`,
+              `Reported category: ${ship.category}`,
+              `Reported destination from feed: ${ship.destination ?? 'Unknown'}`,
+              'Search by vessel name, MMSI/IMO/callsign if inferable from the tracker ID, flag, type, and destination.',
+              'Prefer MarineTraffic/VesselFinder-style public context, Equasis, BalticShipping, owner/operator pages, naval references, shipspotting registries, and reputable maritime references.',
+            ];
+          })();
+
+    const prompt = [
+      ...target,
+      cleanQuestion
+        ? `User question: ${cleanQuestion}`
+        : `Task: build a concise ${kind === 'aircraft' ? 'aircraft' : 'ship'} dossier for the app detail panel.`,
+      '',
+      'Return ONLY JSON with this shape:',
+      '{',
+      '  "summary": "4-6 sentence plain-English OSINT summary. Include what it is, who operates/owns it if known, what it is used for, and relevant open-source context.",',
+      '  "airline": "civilian airline name if this is an airline flight, otherwise Unknown",',
+      '  "operator": "operator/agency/company/unit if known, or Unknown",',
+      '  "country": "country/flag state if known, or Unknown",',
+      '  "registration": "aircraft registration / ICAO hex / MMSI / IMO / callsign if known, or Unknown",',
+      '  "modelOrClass": "aircraft model or ship class/type if known, or Unknown",',
+      '  "origin": "departure airport/city if known, or Unknown",',
+      '  "destination": "arrival airport/city if known, or Unknown",',
+      '  "scheduledDeparture": "scheduled/actual departure time if known, or Unknown",',
+      '  "scheduledArrival": "scheduled/estimated/actual arrival time if known, or Unknown",',
+      '  "flightStatus": "on time | delayed | early | en route | landed | cancelled | unknown, with brief context if known",',
+      '  "role": "mission/use/role in one sentence",',
+      '  "owner": "owner if known, or Unknown",',
+      '  "flag": "ship flag state if relevant, otherwise Unknown",',
+      '  "built": "manufacture/build/commissioning year if known, or Unknown",',
+      '  "confidence": "high | medium | low",',
+      '  "sources": [{ "title": "source title", "url": "https://..." }]',
+      '}',
+      'Rules: Do not invent airline, route, schedule, registration, owner, operator, military unit, MMSI, IMO, or classified/sensitive details. Return Unknown when not found. If route/status comes from a flight tracking page, include that page in sources. If sources conflict, state that in summary and set confidence medium/low.',
+    ].join('\n');
+
+    const body = JSON.stringify({
+      systemInstruction: {
+        parts: [
+          {
+            text:
+              'You are an unclassified OSINT air and maritime systems analyst. Use Google Search. Return strict JSON only. Be factual, concise, and clear about uncertainty.',
+          },
+        ],
+      },
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      tools: [{ googleSearch: {} }],
+      generationConfig: { temperature: 0.25, maxOutputTokens: 2600 },
+    });
+
+    let response: globalThis.Response | null = null;
+    let lastErrorText = '';
+    let lastStatus = 0;
+    let modelUsed = GEMINI_MODEL_FALLBACKS[0];
+
+    try {
+      for (const model of GEMINI_MODEL_FALLBACKS) {
+        const url = `${GEMINI_BASE}/${encodeURIComponent(
+          model,
+        )}:generateContent?key=${encodeURIComponent(apiKey)}`;
+        const attempt = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body,
+        });
+        if (attempt.ok) {
+          response = attempt;
+          modelUsed = model;
+          break;
+        }
+        lastStatus = attempt.status;
+        lastErrorText = await attempt.text();
+        console.warn(
+          `[tracker-intel] ${model} returned ${attempt.status}: ${formatGeminiError(lastErrorText)}`,
+        );
+        if (![404, 429, 500, 502, 503, 504].includes(attempt.status)) break;
+      }
+
+      if (!response) {
+        return res.status(lastStatus || 502).json({
+          error: 'Gemini API error',
+          reason: formatGeminiError(lastErrorText),
+        });
+      }
+
+      const data = (await response.json()) as {
+        candidates?: {
+          content?: { parts?: { text?: string }[] };
+          groundingMetadata?: {
+            groundingChunks?: { web?: { uri?: string; title?: string } }[];
+          };
+        }[];
+      };
+      const candidate = data.candidates?.[0];
+      const content = candidate?.content?.parts?.map((p) => p?.text ?? '').join('').trim();
+      const parsed = content ? (tryParseBriefingJson(content) as Partial<TrackerIntelPayload> | null) : null;
+      const payload: TrackerIntelPayload = parsed?.summary
+        ? {
+            summary: String(parsed.summary),
+            airline: typeof parsed.airline === 'string' ? parsed.airline : undefined,
+            operator: typeof parsed.operator === 'string' ? parsed.operator : undefined,
+            country: typeof parsed.country === 'string' ? parsed.country : undefined,
+            registration: typeof parsed.registration === 'string' ? parsed.registration : undefined,
+            modelOrClass: typeof parsed.modelOrClass === 'string' ? parsed.modelOrClass : undefined,
+            origin: typeof parsed.origin === 'string' ? parsed.origin : undefined,
+            destination: typeof parsed.destination === 'string' ? parsed.destination : undefined,
+            scheduledDeparture: typeof parsed.scheduledDeparture === 'string' ? parsed.scheduledDeparture : undefined,
+            scheduledArrival: typeof parsed.scheduledArrival === 'string' ? parsed.scheduledArrival : undefined,
+            flightStatus: typeof parsed.flightStatus === 'string' ? parsed.flightStatus : undefined,
+            role: typeof parsed.role === 'string' ? parsed.role : undefined,
+            owner: typeof parsed.owner === 'string' ? parsed.owner : undefined,
+            flag: typeof parsed.flag === 'string' ? parsed.flag : undefined,
+            built: typeof parsed.built === 'string' ? parsed.built : undefined,
+            confidence: typeof parsed.confidence === 'string' ? parsed.confidence : undefined,
+            sources: sanitizeSatelliteSources(parsed.sources, candidate?.groundingMetadata?.groundingChunks),
+            generatedAt: new Date().toISOString(),
+            model: modelUsed,
+          }
+        : fallbackTrackerIntel(kind, tracker, modelUsed);
+
+      if (payload.sources.length === 0 && tracker.sourceUrl) {
+        payload.sources = [{ title: tracker.source, url: tracker.sourceUrl }];
+      }
+      trackerIntelCache.set(cacheKey, { payload, updatedAtMs: Date.now() });
+      return res.json(payload);
+    } catch (err) {
+      return res.status(500).json({
+        error: 'Tracker intel lookup failed',
+        message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
   });
 
   app.get('/api/liveuamap/events', async (req: Request, res: Response) => {
@@ -648,16 +1435,47 @@ export function registerRoutes(httpServer: Server, app: Express) {
 
     try {
       const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 120) : undefined;
-
-      const rows = await gdeltAdapter.fetch({
+      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, GDELT_ROUTE_MAX_LIMIT) : undefined;
+      const query: GdeltRouteQuery = {
         region: typeof req.query.region === 'string' ? req.query.region : undefined,
         from: typeof req.query.from === 'string' ? req.query.from : undefined,
         to: typeof req.query.to === 'string' ? req.query.to : undefined,
         limit,
         languages: parseNewsLanguagesParam(req.query.languages),
         conflictNews: parseConflictNewsParam(req.query.conflictNews),
-      });
+      };
+      const key = gdeltCacheKey(query);
+      const cached = gdeltRouteCache.get(key);
+      const now = Date.now();
+      const fresh = cached && now - cached.updatedAtMs <= GDELT_CACHE_TTL_MS;
+
+      let rows: GlobeEntity[];
+      if (fresh && cached.rows.length > 0) {
+        rows = cached.rows;
+      } else {
+        try {
+          rows = await fetchAndCacheGdelt(query);
+          if (rows.length === 0 && cached && cached.rows.length > 0) {
+            console.warn('[gdelt-cache] upstream returned 0; serving previous non-empty cache');
+            rows = cached.rows;
+          } else if (rows.length === 0) {
+            const fallback = Array.from(gdeltRouteCache.values())
+              .filter((v) => Array.isArray(v.rows) && v.rows.length > 0)
+              .sort((a, b) => b.updatedAtMs - a.updatedAtMs)[0];
+            if (fallback && now - fallback.updatedAtMs <= GDELT_STALE_FALLBACK_MS) {
+              console.warn('[gdelt-cache] upstream returned 0; serving freshest non-empty cache entry');
+              rows = fallback.rows;
+            }
+          }
+        } catch (err) {
+          if (cached && now - cached.updatedAtMs <= GDELT_STALE_FALLBACK_MS) {
+            console.warn('[gdelt-cache] serving stale cache due to upstream error:', err);
+            rows = cached.rows;
+          } else {
+            throw err;
+          }
+        }
+      }
 
       const geojson = {
         type: 'FeatureCollection',
@@ -831,22 +1649,57 @@ export function registerRoutes(httpServer: Server, app: Express) {
     if (!acledAdapter.enabled()) {
       return res.status(503).json({
         error: 'ACLED adapter disabled',
-        reason: 'Set ACLED_EMAIL and ACLED_PASSWORD in the server environment (myACLED API access required).',
-        requiredEnv: ['ACLED_EMAIL', 'ACLED_PASSWORD'],
+        reason:
+          'Set ACLED_EMAIL_ADDRESS (or ACLED_EMAIL) and ACLED_ACCESS_KEY from https://developer.acleddata.com/, or legacy ACLED_EMAIL + ACLED_PASSWORD for myACLED OAuth.',
+        requiredEnv: [
+          'ACLED_ACCESS_KEY',
+          'ACLED_EMAIL_ADDRESS',
+          'ACLED_EMAIL',
+          'ACLED_PASSWORD',
+        ],
       });
     }
 
     try {
       const limitRaw = typeof req.query.limit === 'string' ? parseInt(req.query.limit, 10) : NaN;
-      const limit = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 200) : undefined;
+      const pageSize = Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 2000) : 1000;
+      const cursorRaw = typeof req.query.cursor === 'string' ? parseInt(req.query.cursor, 10) : NaN;
+      const cursor = Number.isFinite(cursorRaw) && cursorRaw >= 0 ? Math.floor(cursorRaw) : 0;
+      const fetchLimit = Math.min(ACLED_ROUTE_MAX_LIMIT, cursor + pageSize);
 
-      const rows = await acledAdapter.fetch({
+      const fromQ = typeof req.query.from === 'string' ? req.query.from : undefined;
+      const toQ = typeof req.query.to === 'string' ? req.query.to : undefined;
+
+      let rowsAll = await acledAdapter.fetch({
         region: typeof req.query.region === 'string' ? req.query.region : undefined,
-        from: typeof req.query.from === 'string' ? req.query.from : undefined,
-        to: typeof req.query.to === 'string' ? req.query.to : undefined,
+        from: fromQ,
+        to: toQ,
         keyword: typeof req.query.keyword === 'string' ? req.query.keyword : undefined,
-        limit,
+        limit: fetchLimit,
       });
+
+      if (rowsAll.length === 0) {
+        const fileRows = await loadAcledFileFallback(fromQ, toQ);
+        if (fileRows.length > 0) {
+          rowsAll = fileRows;
+        }
+      }
+
+      // Adapter widens queries (~14d) so the API returns data; narrow back to the client's window
+      // so GDELT + ACLED match the same Filters → Time range and both show in the feed/globe.
+      if (fromQ && toQ) {
+        const fromDay = fromQ.slice(0, 10);
+        const toDay = toQ.slice(0, 10);
+        if (/^\d{4}-\d{2}-\d{2}$/.test(fromDay) && /^\d{4}-\d{2}-\d{2}$/.test(toDay)) {
+          rowsAll = rowsAll.filter((row) => {
+            const day = typeof row.timestamp === 'string' ? row.timestamp.slice(0, 10) : '';
+            return day >= fromDay && day <= toDay;
+          });
+        }
+      }
+
+      const rows = rowsAll.slice(cursor, cursor + pageSize);
+      const nextCursor = rows.length === pageSize ? String(cursor + rows.length) : null;
 
       const geojson = {
         type: 'FeatureCollection',
@@ -860,6 +1713,9 @@ export function registerRoutes(httpServer: Server, app: Express) {
       return res.json({
         source: 'acled',
         count: rows.length,
+        totalAvailable: rowsAll.length,
+        cursor: String(cursor),
+        nextCursor,
         entities: rows,
         geojson,
       });
@@ -868,6 +1724,20 @@ export function registerRoutes(httpServer: Server, app: Express) {
       return res.status(502).json({
         error: 'ACLED upstream error',
         message: err instanceof Error ? err.message : 'Unknown error',
+      });
+    }
+  });
+
+  app.get('/api/acled/debug', async (_req: Request, res: Response) => {
+    try {
+      const info = await getAcledDebugInfo();
+      return res.json(info);
+    } catch (err) {
+      return res.status(500).json({
+        enabled: acledAdapter.enabled(),
+        mode: 'none',
+        embargoDate: null,
+        message: err instanceof Error ? err.message : 'Unknown ACLED debug error',
       });
     }
   });

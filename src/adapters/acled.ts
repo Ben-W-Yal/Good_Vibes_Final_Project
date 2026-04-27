@@ -5,6 +5,33 @@ import type { GlobeEntity, SourceQuery } from "../types/globe";
 
 const OAUTH_URL = "https://acleddata.com/oauth/token";
 const READ_URL = "https://acleddata.com/api/acled/read";
+/** Public developer API (same flow as R package acled.api — key + email from https://developer.acleddata.com/) */
+const DEVELOPER_READ_URL = "https://api.acleddata.com/acled/read/";
+/** Pipe-separated fields aligned with acled.api defaults plus fields our UI maps. */
+const DEVELOPER_FIELDS = [
+  "event_id_cnty",
+  "region",
+  "country",
+  "year",
+  "event_date",
+  "source",
+  "admin1",
+  "admin2",
+  "admin3",
+  "location",
+  "latitude",
+  "longitude",
+  "event_type",
+  "sub_event_type",
+  "interaction",
+  "fatalities",
+  "tags",
+  "timestamp",
+  "notes",
+  "geo_precision",
+  "actor1",
+  "actor2",
+].join("|");
 
 /** https://acleddata.com/api-documentation/elements-acleds-api — common OAuth/API failures */
 function oauthErrorMessage(raw: unknown, status: number): string {
@@ -21,6 +48,9 @@ function oauthErrorMessage(raw: unknown, status: number): string {
 
 function hintAcledAccessMessage(message: string): string {
   const m = message.trim();
+  if (/denied the request|resource owner|invalid.?token|unauthori[sz]ed/i.test(m)) {
+    return `${m} — Confirm myACLED login works, your account has API access enabled, and ACLED_EMAIL / ACLED_PASSWORD in .env match that account (not a third-party password).`;
+  }
   if (/access denied/i.test(m)) {
     return `${m} — Ensure your myACLED user is in the API access group (ACLED API documentation).`;
   }
@@ -115,10 +145,11 @@ function cacheToken(j: z.infer<typeof tokenResponseSchema>): void {
 }
 
 async function fetchPasswordToken(): Promise<string> {
-  const email = process.env.ACLED_EMAIL?.trim();
+  const email =
+    process.env.ACLED_EMAIL?.trim() || process.env.ACLED_EMAIL_ADDRESS?.trim();
   const password = process.env.ACLED_PASSWORD?.trim();
   if (!email || !password) {
-    throw new Error("ACLED_EMAIL and ACLED_PASSWORD are required");
+    throw new Error("ACLED_EMAIL (or ACLED_EMAIL_ADDRESS) and ACLED_PASSWORD are required");
   }
 
   const res = await fetch(OAUTH_URL, {
@@ -174,16 +205,47 @@ async function getAccessToken(): Promise<string> {
   return fetchPasswordToken();
 }
 
+function resolveDeveloperEmail(): string {
+  return (
+    process.env.ACLED_EMAIL_ADDRESS?.trim() ||
+    process.env.ACLED_EMAIL?.trim() ||
+    ""
+  );
+}
+
+function resolveDeveloperKey(): string {
+  return (
+    process.env.ACLED_ACCESS_KEY?.trim() ||
+    process.env.ACLED_API_KEY?.trim() ||
+    ""
+  );
+}
+
+function useDeveloperAcledApi(): boolean {
+  return Boolean(resolveDeveloperKey() && resolveDeveloperEmail());
+}
+
 function ymd(iso: string): string {
   return iso.slice(0, 10);
 }
 
-/** ACLED needs a wide enough window or many regions return 0 rows (sparse in 24h). */
-const MIN_RANGE_DAYS = 14;
+/** ACLED query window is driven by caller-provided from/to (UI filter). */
+const MIN_RANGE_DAYS = 0;
+const MAX_ACLED_ROWS = Math.min(
+  100_000,
+  Math.max(5_000, Number(process.env.ACLED_MAX_ROWS ?? 50_000) || 50_000),
+);
+const ACLED_PAGE_SIZE = 500;
 
 function widenRange(fromIso: string, toIso: string): { from: string; to: string } {
   const toT = new Date(toIso).getTime();
   let fromT = new Date(fromIso).getTime();
+  if (!Number.isFinite(toT) || !Number.isFinite(fromT)) {
+    return { from: fromIso, to: toIso };
+  }
+  if (fromT > toT) {
+    fromT = toT;
+  }
   const minMs = MIN_RANGE_DAYS * 86_400_000;
   if (toT - fromT < minMs) {
     fromT = toT - minMs;
@@ -246,7 +308,9 @@ function rowToEntity(row: Record<string, unknown>): GlobeEntity | null {
     label: title || sub,
     lat,
     lon,
-    timestamp: `${eventDate}T12:00:00.000Z`,
+    // End of event UTC day so client "last N hours" filters don't drop same-day ACLED rows
+    // (noon was often < rolling cutoff and hid everything except GDELT).
+    timestamp: `${eventDate}T23:59:59.999Z`,
     confidence,
     metadata: {
       notes,
@@ -263,163 +327,519 @@ function rowToEntity(row: Record<string, unknown>): GlobeEntity | null {
   };
 }
 
-export const acledAdapter: SourceAdapter = {
-  source: "acled",
-  enabled() {
-    return Boolean(process.env.ACLED_EMAIL?.trim() && process.env.ACLED_PASSWORD?.trim());
-  },
+async function developerReadPage(extra: URLSearchParams): Promise<Record<string, unknown>[]> {
+  const email = resolveDeveloperEmail();
+  const key = resolveDeveloperKey();
+  if (!email || !key) {
+    throw new Error(
+      "Developer API requires ACLED_ACCESS_KEY and ACLED_EMAIL_ADDRESS (or ACLED_EMAIL)",
+    );
+  }
+  const q = new URLSearchParams();
+  q.set("key", key);
+  q.set("email", email);
+  for (const [k, v] of Array.from(extra.entries())) {
+    q.set(k, v);
+  }
+  const url = `${DEVELOPER_READ_URL}?${q.toString()}`;
+  const res = await fetch(url, {
+    headers: { Accept: "application/json", "User-Agent": "GeoIntel/1.0" },
+  });
+  const text = await res.text();
+  let raw: unknown;
+  try {
+    raw = JSON.parse(text);
+  } catch {
+    raw = {};
+  }
+  const root = raw && typeof raw === "object" ? (raw as Record<string, unknown>) : {};
 
-  async fetch(query?: SourceQuery): Promise<GlobeEntity[]> {
-    if (!this.enabled()) return [];
+  if (!res.ok) {
+    throw new Error(`ACLED developer API HTTP ${res.status}: ${text.slice(0, 400)}`);
+  }
+  if (root.success === false) {
+    const err = root.error as Record<string, unknown> | undefined;
+    const msg =
+      err && typeof err.message === "string"
+        ? err.message
+        : typeof root.message === "string"
+          ? root.message
+          : text.slice(0, 300);
+    throw new Error(`ACLED API: ${msg}`);
+  }
 
-    const toIso = query?.to ?? new Date().toISOString();
-    const fromIso = query?.from ?? new Date(Date.now() - 30 * 24 * 3600_000).toISOString();
-    const { from: fromWide, to: toWide } = widenRange(fromIso, toIso);
-    const from = ymd(fromWide);
-    const to = ymd(toWide);
-    const maxRows = Math.min(200, Math.max(20, query?.limit ?? 100));
+  const data = root.data;
+  if (!Array.isArray(data)) return [];
+  return data.map((item) => flattenAcledRow(item as Record<string, unknown>));
+}
 
-    const regionKey = query?.region?.trim() ?? "";
-    const rf = regionFilters(regionKey || undefined);
-    const cacheKey = `acled:v4:${from}:${to}:${regionKey || "global"}:${maxRows}`;
+async function fetchAcledDeveloper(query?: SourceQuery): Promise<GlobeEntity[]> {
+  const toIso = query?.to ?? new Date().toISOString();
+  const fromIso = query?.from ?? new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const { from: fromWide, to: toWide } = widenRange(fromIso, toIso);
+  const from = ymd(fromWide);
+  const to = ymd(toWide);
+  const maxRows = Math.min(MAX_ACLED_ROWS, Math.max(20, query?.limit ?? 1000));
 
-    return withCache(cacheKey, 120_000, async () => {
-      const token = await getAccessToken();
+  const regionKey = query?.region?.trim() ?? "";
+  const rf = regionFilters(regionKey || undefined);
+  const cacheKey = `acled:dev:v1:${from}:${to}:${regionKey || "global"}:${maxRows}`;
 
-      const baseFields = [
-        "event_id_cnty",
-        "event_date",
-        "event_type",
-        "sub_event_type",
-        "country",
-        "location",
-        "latitude",
-        "longitude",
-        "notes",
-        "fatalities",
-        "geo_precision",
-        "actor1",
-        "actor2",
-        "region",
-      ].join("|");
+  return withCache(cacheKey, 120_000, async () => {
+    async function readOnce(
+      extra: URLSearchParams,
+    ): Promise<{ rows: Record<string, unknown>[]; embargoDate: string | null }> {
+      const rows = await developerReadPage(extra);
+      return { rows, embargoDate: null };
+    }
 
-      async function readOnceRaw(
-        extra: URLSearchParams,
-      ): Promise<z.infer<typeof readResponseSchema>> {
-        const res = await fetch(`${READ_URL}?${extra.toString()}`, {
+    async function readPaged(
+      makeParams: (page: number, pageSize: number) => URLSearchParams,
+    ): Promise<{ rows: Record<string, unknown>[]; embargoDate: string | null }> {
+      const pageSize = Math.min(ACLED_PAGE_SIZE, maxRows);
+      const merged: Record<string, unknown>[] = [];
+      const seen = new Set<string>();
+      let page = 1;
+      let embargoDate: string | null = null;
+
+      const maxPageRequests = Math.max(1, Math.min(200, Math.ceil(maxRows / pageSize) + 2));
+      while (merged.length < maxRows && page <= maxPageRequests) {
+        const { rows: batch, embargoDate: batchEmbargoDate } = await readOnce(
+          makeParams(page, pageSize),
+        );
+        if (!embargoDate && batchEmbargoDate) embargoDate = batchEmbargoDate;
+        if (batch.length === 0) break;
+
+        let added = 0;
+        for (const row of batch) {
+          const key =
+            str(pick(row, "event_id_cnty", "event_id_no_cnty", "event_id")) ??
+            JSON.stringify(row).slice(0, 220);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(row);
+          added += 1;
+          if (merged.length >= maxRows) break;
+        }
+
+        if (added === 0 || batch.length < pageSize) break;
+        page += 1;
+      }
+
+      return { rows: merged, embargoDate };
+    }
+
+    function buildBetweenParams(
+      fromYmd: string,
+      toYmd: string,
+      page?: number,
+      pageSize?: number,
+    ): URLSearchParams {
+      const p = new URLSearchParams();
+      p.set("event_date", `${fromYmd}|${toYmd}`);
+      p.set("event_date_where", "BETWEEN");
+      p.set("fields", DEVELOPER_FIELDS);
+      p.set("export_type", "monadic");
+      p.set("limit", String(pageSize ?? Math.min(ACLED_PAGE_SIZE, maxRows)));
+      if (page && page > 1) p.set("page", String(page));
+      if (rf.country) p.set("country", rf.country);
+      if (rf.region) p.set("region", rf.region);
+      if (query?.keyword?.trim()) p.set("notes", query.keyword.trim());
+      return p;
+    }
+
+    function shiftWindowToEmbargo(embargo: string): { from: string; to: string } {
+      const toT = new Date(`${embargo}T23:59:59Z`).getTime();
+      const fromT = new Date(from).getTime();
+      const origToT = new Date(to).getTime();
+      const spanMs = Math.max(MIN_RANGE_DAYS * 86_400_000, origToT - fromT);
+      return { from: ymd(new Date(toT - spanMs).toISOString()), to: ymd(new Date(toT).toISOString()) };
+    }
+
+    let rows: Record<string, unknown>[] = [];
+    let embargoDate: string | null = null;
+
+    try {
+      const first = await readPaged((page, pageSize) =>
+        buildBetweenParams(from, to, page, pageSize),
+      );
+      rows = first.rows;
+      embargoDate = first.embargoDate;
+
+      if (rows.length === 0 && embargoDate && embargoDate < to) {
+        const shifted = shiftWindowToEmbargo(embargoDate);
+        console.info(
+          `[acled] developer account embargoed at ${embargoDate}; retrying window ${shifted.from}..${shifted.to}`,
+        );
+        const second = await readPaged((page, pageSize) =>
+          buildBetweenParams(shifted.from, shifted.to, page, pageSize),
+        );
+        rows = second.rows;
+      }
+    } catch (e1) {
+      console.warn("[acled] developer BETWEEN query failed, retrying with year range:", e1);
+      const y = new Date().getFullYear();
+      try {
+        const r2 = await readPaged((page, pageSize) => {
+          const p2 = new URLSearchParams();
+          p2.set("year", `${y - 1}|${y}`);
+          p2.set("year_where", "BETWEEN");
+          p2.set("fields", DEVELOPER_FIELDS);
+          p2.set("export_type", "monadic");
+          p2.set("limit", String(pageSize));
+          if (page > 1) p2.set("page", String(page));
+          if (rf.country) p2.set("country", rf.country);
+          if (rf.region) p2.set("region", rf.region);
+          if (query?.keyword?.trim()) p2.set("notes", query.keyword.trim());
+          return p2;
+        });
+        rows = r2.rows;
+      } catch (e2) {
+        console.warn("[acled] developer year BETWEEN failed, retrying single year:", e2);
+        const r3 = await readPaged((page, pageSize) => {
+          const p3 = new URLSearchParams();
+          p3.set("year", String(y));
+          p3.set("fields", DEVELOPER_FIELDS);
+          p3.set("export_type", "monadic");
+          p3.set("limit", String(pageSize));
+          if (page > 1) p3.set("page", String(page));
+          if (rf.country) p3.set("country", rf.country);
+          if (rf.region) p3.set("region", rf.region);
+          if (query?.keyword?.trim()) p3.set("notes", query.keyword.trim());
+          return p3;
+        });
+        rows = r3.rows;
+      }
+    }
+
+    if (rows.length === 0) {
+      const hint = embargoDate
+        ? `account embargo cutoff = ${embargoDate}. Your tier only allows events at least 12 months old.`
+        : "check API key, tier, region, or try Filters → Time range (uses last 14+ days server-side for ACLED).";
+      console.warn(`[acled] developer returned 0 rows — ${hint}`);
+    }
+
+    const out: GlobeEntity[] = [];
+    for (const row of rows) {
+      const g = rowToEntity(row);
+      if (g) out.push(g);
+      if (out.length >= maxRows) break;
+    }
+    return out;
+  });
+}
+
+async function fetchAcledOAuth(query?: SourceQuery): Promise<GlobeEntity[]> {
+  const toIso = query?.to ?? new Date().toISOString();
+  const fromIso = query?.from ?? new Date(Date.now() - 7 * 24 * 3600_000).toISOString();
+  const { from: fromWide, to: toWide } = widenRange(fromIso, toIso);
+  const from = ymd(fromWide);
+  const to = ymd(toWide);
+  const maxRows = Math.min(MAX_ACLED_ROWS, Math.max(20, query?.limit ?? 1000));
+
+  const regionKey = query?.region?.trim() ?? "";
+  const rf = regionFilters(regionKey || undefined);
+  const cacheKey = `acled:oauth:v5:${from}:${to}:${regionKey || "global"}:${maxRows}`;
+
+  return withCache(cacheKey, 120_000, async () => {
+    const token = await getAccessToken();
+
+    const baseFields = [
+      "event_id_cnty",
+      "event_date",
+      "event_type",
+      "sub_event_type",
+      "country",
+      "location",
+      "latitude",
+      "longitude",
+      "notes",
+      "fatalities",
+      "geo_precision",
+      "actor1",
+      "actor2",
+      "region",
+    ].join("|");
+
+    async function readOnceRaw(
+      extra: URLSearchParams,
+    ): Promise<z.infer<typeof readResponseSchema>> {
+      async function apiCall(bearer: string): Promise<Response> {
+        return fetch(`${READ_URL}?${extra.toString()}`, {
           headers: {
-            Authorization: `Bearer ${token}`,
+            Authorization: `Bearer ${bearer}`,
             Accept: "application/json",
           },
         });
-
-        const raw: unknown = await res.json().catch(() => ({}));
-        if (!res.ok) {
-          throw new Error(`ACLED HTTP ${res.status}: ${readBodyMessage(raw)}`);
-        }
-
-        const parsed = readResponseSchema.parse(raw);
-        if (acledJsonIndicatesError(parsed)) {
-          const st = parsed.status;
-          const msg = Array.isArray(parsed.messages)
-            ? parsed.messages.map(String).join("; ")
-            : `status=${String(st)}`;
-          throw new Error(`ACLED rejected: ${hintAcledAccessMessage(msg)}`);
-        }
-        return parsed;
       }
 
-      async function readOnce(
-        extra: URLSearchParams,
-      ): Promise<{ rows: Record<string, unknown>[]; embargoDate: string | null }> {
-        const parsed = await readOnceRaw(extra);
-        const rows = (parsed.data ?? []).map((r) => flattenAcledRow(r));
-        return { rows, embargoDate: extractEmbargoDate(parsed) };
+      let bearer = token;
+      let res = await apiCall(bearer);
+      let raw: unknown = await res.json().catch(() => ({}));
+      if (!res.ok && res.status === 401) {
+        tokenCache = null;
+        bearer = await getAccessToken();
+        res = await apiCall(bearer);
+        raw = await res.json().catch(() => ({}));
       }
 
-      function buildBetweenParams(fromYmd: string, toYmd: string): URLSearchParams {
-        const p = new URLSearchParams();
-        p.set("_format", "json");
-        p.set("event_date", `${fromYmd}|${toYmd}`);
-        p.set("event_date_where", "BETWEEN");
-        p.set("fields", baseFields);
-        p.set("limit", String(maxRows));
-        if (rf.country) p.set("country", rf.country);
-        if (rf.region) p.set("region", rf.region);
-        if (query?.keyword?.trim()) p.set("notes", query.keyword.trim());
-        return p;
+      if (!res.ok) {
+        const body = readBodyMessage(raw);
+        const hint =
+          res.status === 401
+            ? `${body} (API returned 401 — verify myACLED credentials, API entitlement, and any required consent at https://acleddata.com/ )`
+            : body;
+        throw new Error(`ACLED HTTP ${res.status}: ${hint}`);
       }
 
-      function shiftWindowToEmbargo(embargo: string): { from: string; to: string } {
-        // Anchor `to` at the embargo cutoff and keep the same window length (min MIN_RANGE_DAYS).
-        const toT = new Date(`${embargo}T23:59:59Z`).getTime();
-        const fromT = new Date(from).getTime();
-        const origToT = new Date(to).getTime();
-        const spanMs = Math.max(MIN_RANGE_DAYS * 86_400_000, origToT - fromT);
-        return { from: ymd(new Date(toT - spanMs).toISOString()), to: ymd(new Date(toT).toISOString()) };
+      const parsed = readResponseSchema.parse(raw);
+      if (acledJsonIndicatesError(parsed)) {
+        const st = parsed.status;
+        const msg = Array.isArray(parsed.messages)
+          ? parsed.messages.map(String).join("; ")
+          : `status=${String(st)}`;
+        throw new Error(`ACLED rejected: ${hintAcledAccessMessage(msg)}`);
       }
+      return parsed;
+    }
 
-      let rows: Record<string, unknown>[] = [];
+    async function readOnce(
+      extra: URLSearchParams,
+    ): Promise<{ rows: Record<string, unknown>[]; embargoDate: string | null }> {
+      const parsed = await readOnceRaw(extra);
+      const rows = (parsed.data ?? []).map((r) => flattenAcledRow(r));
+      return { rows, embargoDate: extractEmbargoDate(parsed) };
+    }
+
+    async function readPaged(
+      makeParams: (page: number, pageSize: number) => URLSearchParams,
+    ): Promise<{ rows: Record<string, unknown>[]; embargoDate: string | null }> {
+      const pageSize = Math.min(ACLED_PAGE_SIZE, maxRows);
+      const merged: Record<string, unknown>[] = [];
+      const seen = new Set<string>();
+      let page = 1;
       let embargoDate: string | null = null;
 
-      try {
-        const first = await readOnce(buildBetweenParams(from, to));
-        rows = first.rows;
-        embargoDate = first.embargoDate;
+      const maxPageRequests = Math.max(1, Math.min(200, Math.ceil(maxRows / pageSize) + 2));
+      while (merged.length < maxRows && page <= maxPageRequests) {
+        const { rows: batch, embargoDate: batchEmbargoDate } = await readOnce(
+          makeParams(page, pageSize),
+        );
+        if (!embargoDate && batchEmbargoDate) embargoDate = batchEmbargoDate;
+        if (batch.length === 0) break;
 
-        // Account is embargoed (e.g. 12-month tier) and our window was too recent → retry shifted.
-        if (rows.length === 0 && embargoDate && embargoDate < to) {
-          const shifted = shiftWindowToEmbargo(embargoDate);
-          console.info(
-            `[acled] account embargoed at ${embargoDate}; retrying window ${shifted.from}..${shifted.to}`,
-          );
-          const second = await readOnce(buildBetweenParams(shifted.from, shifted.to));
-          rows = second.rows;
+        let added = 0;
+        for (const row of batch) {
+          const key =
+            str(pick(row, "event_id_cnty", "event_id_no_cnty", "event_id")) ??
+            JSON.stringify(row).slice(0, 220);
+          if (seen.has(key)) continue;
+          seen.add(key);
+          merged.push(row);
+          added += 1;
+          if (merged.length >= maxRows) break;
         }
-      } catch (e1) {
-        console.warn("[acled] BETWEEN query failed, retrying with year range:", e1);
-        const y = new Date().getFullYear();
-        const p2 = new URLSearchParams();
-        p2.set("_format", "json");
-        p2.set("year", `${y - 1}|${y}`);
-        p2.set("year_where", "BETWEEN");
-        p2.set("fields", baseFields);
-        p2.set("limit", String(maxRows));
-        if (rf.country) p2.set("country", rf.country);
-        if (rf.region) p2.set("region", rf.region);
-        if (query?.keyword?.trim()) p2.set("notes", query.keyword.trim());
-        try {
-          const r2 = await readOnce(p2);
-          rows = r2.rows;
-        } catch (e2) {
-          console.warn("[acled] year BETWEEN failed, retrying single year:", e2);
+
+        if (added === 0 || batch.length < pageSize) break;
+        page += 1;
+      }
+
+      return { rows: merged, embargoDate };
+    }
+
+    function buildBetweenParams(
+      fromYmd: string,
+      toYmd: string,
+      page?: number,
+      pageSize?: number,
+    ): URLSearchParams {
+      const p = new URLSearchParams();
+      p.set("_format", "json");
+      p.set("event_date", `${fromYmd}|${toYmd}`);
+      p.set("event_date_where", "BETWEEN");
+      p.set("fields", baseFields);
+      p.set("limit", String(pageSize ?? Math.min(ACLED_PAGE_SIZE, maxRows)));
+      if (page && page > 1) p.set("page", String(page));
+      if (rf.country) p.set("country", rf.country);
+      if (rf.region) p.set("region", rf.region);
+      if (query?.keyword?.trim()) p.set("notes", query.keyword.trim());
+      return p;
+    }
+
+    function shiftWindowToEmbargo(embargo: string): { from: string; to: string } {
+      const toT = new Date(`${embargo}T23:59:59Z`).getTime();
+      const fromT = new Date(from).getTime();
+      const origToT = new Date(to).getTime();
+      const spanMs = Math.max(MIN_RANGE_DAYS * 86_400_000, origToT - fromT);
+      return { from: ymd(new Date(toT - spanMs).toISOString()), to: ymd(new Date(toT).toISOString()) };
+    }
+
+    let rows: Record<string, unknown>[] = [];
+    let embargoDate: string | null = null;
+
+    try {
+      const first = await readPaged((page, pageSize) =>
+        buildBetweenParams(from, to, page, pageSize),
+      );
+      rows = first.rows;
+      embargoDate = first.embargoDate;
+
+      if (rows.length === 0 && embargoDate && embargoDate < to) {
+        const shifted = shiftWindowToEmbargo(embargoDate);
+        console.info(
+          `[acled] account embargoed at ${embargoDate}; retrying window ${shifted.from}..${shifted.to}`,
+        );
+        const second = await readPaged((page, pageSize) =>
+          buildBetweenParams(shifted.from, shifted.to, page, pageSize),
+        );
+        rows = second.rows;
+      }
+    } catch (e1) {
+      console.warn("[acled] BETWEEN query failed, retrying with year range:", e1);
+      const y = new Date().getFullYear();
+      try {
+        const r2 = await readPaged((page, pageSize) => {
+          const p2 = new URLSearchParams();
+          p2.set("_format", "json");
+          p2.set("year", `${y - 1}|${y}`);
+          p2.set("year_where", "BETWEEN");
+          p2.set("fields", baseFields);
+          p2.set("limit", String(pageSize));
+          if (page > 1) p2.set("page", String(page));
+          if (rf.country) p2.set("country", rf.country);
+          if (rf.region) p2.set("region", rf.region);
+          if (query?.keyword?.trim()) p2.set("notes", query.keyword.trim());
+          return p2;
+        });
+        rows = r2.rows;
+      } catch (e2) {
+        console.warn("[acled] year BETWEEN failed, retrying single year:", e2);
+        const r3 = await readPaged((page, pageSize) => {
           const p3 = new URLSearchParams();
           p3.set("_format", "json");
           p3.set("year", String(y));
           p3.set("fields", baseFields);
-          p3.set("limit", String(maxRows));
+          p3.set("limit", String(pageSize));
+          if (page > 1) p3.set("page", String(page));
           if (rf.country) p3.set("country", rf.country);
           if (rf.region) p3.set("region", rf.region);
           if (query?.keyword?.trim()) p3.set("notes", query.keyword.trim());
-          const r3 = await readOnce(p3);
-          rows = r3.rows;
-        }
+          return p3;
+        });
+        rows = r3.rows;
       }
+    }
 
-      if (rows.length === 0) {
-        const hint = embargoDate
-          ? `account embargo cutoff = ${embargoDate}. Your tier only allows events at least 12 months old.`
-          : "check API tier, region, or try Filters → Time range (uses last 14+ days server-side for ACLED).";
-        console.warn(`[acled] 0 rows — ${hint}`);
-      }
+    if (rows.length === 0) {
+      const hint = embargoDate
+        ? `account embargo cutoff = ${embargoDate}. Your tier only allows events at least 12 months old.`
+        : "check API tier, region, or try Filters → Time range (uses last 14+ days server-side for ACLED).";
+      console.warn(`[acled] 0 rows — ${hint}`);
+    }
 
-      const out: GlobeEntity[] = [];
-      for (const row of rows) {
-        const g = rowToEntity(row);
-        if (g) out.push(g);
-        if (out.length >= maxRows) break;
-      }
-      return out;
-    });
+    const out: GlobeEntity[] = [];
+    for (const row of rows) {
+      const g = rowToEntity(row);
+      if (g) out.push(g);
+      if (out.length >= maxRows) break;
+    }
+    return out;
+  });
+}
+
+export const acledAdapter: SourceAdapter = {
+  source: "acled",
+  enabled() {
+    return (
+      useDeveloperAcledApi() ||
+      Boolean(process.env.ACLED_EMAIL?.trim() && process.env.ACLED_PASSWORD?.trim())
+    );
+  },
+
+  async fetch(query?: SourceQuery): Promise<GlobeEntity[]> {
+    if (!this.enabled()) return [];
+    if (useDeveloperAcledApi()) return fetchAcledDeveloper(query);
+    return fetchAcledOAuth(query);
   },
 };
+
+export type AcledDebugInfo = {
+  enabled: boolean;
+  mode: "developer" | "oauth" | "none";
+  embargoDate: string | null;
+  message: string;
+};
+
+export async function getAcledDebugInfo(): Promise<AcledDebugInfo> {
+  if (!acledAdapter.enabled()) {
+    return {
+      enabled: false,
+      mode: "none",
+      embargoDate: null,
+      message: "ACLED is disabled (missing credentials).",
+    };
+  }
+
+  if (useDeveloperAcledApi()) {
+    try {
+      const p = new URLSearchParams();
+      p.set("limit", "1");
+      p.set("fields", "event_date");
+      p.set("export_type", "monadic");
+      await developerReadPage(p);
+      return {
+        enabled: true,
+        mode: "developer",
+        embargoDate: null,
+        message: "Developer API reachable. ACLED recency restrictions depend on account tier.",
+      };
+    } catch (e) {
+      return {
+        enabled: true,
+        mode: "developer",
+        embargoDate: null,
+        message: `Developer API error: ${(e as Error).message}`,
+      };
+    }
+  }
+
+  try {
+    const token = await getAccessToken();
+    const params = new URLSearchParams();
+    params.set("_format", "json");
+    params.set("limit", "1");
+    params.set("fields", "event_date");
+    const res = await fetch(`${READ_URL}?${params.toString()}`, {
+      headers: {
+        Authorization: `Bearer ${token}`,
+        Accept: "application/json",
+      },
+    });
+    const raw = (await res.json().catch(() => ({}))) as unknown;
+    const parsed = readResponseSchema.safeParse(raw);
+    if (!res.ok || !parsed.success) {
+      return {
+        enabled: true,
+        mode: "oauth",
+        embargoDate: null,
+        message: `OAuth API error (${res.status}).`,
+      };
+    }
+    const embargoDate = extractEmbargoDate(parsed.data);
+    return {
+      enabled: true,
+      mode: "oauth",
+      embargoDate,
+      message: embargoDate
+        ? `Account recency restriction detected: ${embargoDate}`
+        : "No recency restriction reported by ACLED response.",
+    };
+  } catch (e) {
+    return {
+      enabled: true,
+      mode: "oauth",
+      embargoDate: null,
+      message: `OAuth API error: ${(e as Error).message}`,
+    };
+  }
+}

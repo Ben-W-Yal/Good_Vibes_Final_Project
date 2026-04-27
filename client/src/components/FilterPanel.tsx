@@ -1,23 +1,14 @@
 /**
- * FilterPanel — floating panel for event category/severity filter controls
+ * FilterPanel — floating panel for event feed filters
  */
 import { useStore } from '../store';
-import type { Category, Severity } from '../data/events';
 import type { GlobeSource } from '../../../src/types/globe';
+import type { EventType } from '../data/events';
+import type { RegionFilterKey } from '../lib/eventFilters';
+import { EVENT_TYPE_FILTERS, REGION_FILTERS } from '../lib/eventFilters';
 
-const CATEGORIES = [
-  { key: 'conflict', label: 'Conflict', color: '#f85149', icon: '⚔️' },
-  { key: 'domestic', label: 'Domestic', color: '#bc8cff', icon: '🏛️' },
-  { key: 'local', label: 'Local', color: '#58a6ff', icon: '📍' },
-  { key: 'social', label: 'Social', color: '#3fb950', icon: '🗣️' },
-] as const satisfies ReadonlyArray<{ key: Category; label: string; color: string; icon: string }>;
-
-const SEVERITIES = [
-  { key: 'critical', label: 'Critical', color: '#f85149' },
-  { key: 'high', label: 'High', color: '#f0883e' },
-  { key: 'medium', label: 'Medium', color: '#d29922' },
-  { key: 'low', label: 'Low', color: '#3fb950' },
-] as const satisfies ReadonlyArray<{ key: Severity; label: string; color: string }>;
+const EVENT_TYPES = EVENT_TYPE_FILTERS;
+const REGIONS = REGION_FILTERS;
 
 const TIME_RANGES = [
   { label: '1h', hours: 1 },
@@ -47,45 +38,50 @@ const NEWS_LANGUAGES = [
 ] as const;
 
 const SOURCES = [
-  { key: 'ai', label: 'AI Web OSINT' },
-  { key: 'thenewsapi', label: 'TheNewsAPI' },
   { key: 'acled', label: 'ACLED' },
-  { key: 'liveuamap', label: 'Liveuamap' },
-  { key: 'perigon', label: 'Perigon' },
   { key: 'gdelt', label: 'GDELT' },
 ] as const satisfies ReadonlyArray<{ key: GlobeSource; label: string }>;
 
 export default function FilterPanel() {
-  const { showFilters, setShowFilters, filters, setFilters, setTimeRangeHours } = useStore();
+  const {
+    showFilters,
+    setShowFilters,
+    filters,
+    setFilters,
+    setTimeRangeHours,
+    selectedEvent,
+    selectedTracker,
+  } = useStore();
 
   if (!showFilters) return null;
+  const leftOffset = selectedEvent ? 416 : selectedTracker ? 396 : 16;
 
-  const toggleCategory = (cat: Category) => {
-    const current = filters.categories;
-    const next = current.includes(cat)
-      ? current.filter((c) => c !== cat)
-      : [...current, cat];
-    setFilters({ categories: next });
+  const toggleEventType = (eventType: EventType) => {
+    const current = filters.eventTypes;
+    const next = current.includes(eventType)
+      ? current.filter((t) => t !== eventType)
+      : [...current, eventType];
+    setFilters({ eventTypes: next });
   };
 
-  const toggleSeverity = (sev: Severity) => {
-    const current = filters.severities;
-    const next = current.includes(sev)
-      ? current.filter((s) => s !== sev)
-      : [...current, sev];
-    setFilters({ severities: next });
+  const toggleRegion = (region: RegionFilterKey) => {
+    const current = filters.regions;
+    const next = current.includes(region)
+      ? current.filter((r) => r !== region)
+      : [...current, region];
+    setFilters({ regions: next });
   };
 
-  const allCatsActive = CATEGORIES.every((c) => filters.categories.includes(c.key));
-  const allSevsActive = SEVERITIES.every((s) => filters.severities.includes(s.key));
+  const allTypesActive = EVENT_TYPES.every((t) => filters.eventTypes.includes(t));
+  const allRegionsActive = REGIONS.every((r) => filters.regions.includes(r.key));
   const allSourcesActive = SOURCES.every((s) => filters.sources.includes(s.key));
 
-  const toggleAllCats = () => {
-    setFilters({ categories: allCatsActive ? [] : CATEGORIES.map((c) => c.key) });
+  const toggleAllTypes = () => {
+    setFilters({ eventTypes: allTypesActive ? [] : [...EVENT_TYPES] });
   };
 
-  const toggleAllSevs = () => {
-    setFilters({ severities: allSevsActive ? [] : SEVERITIES.map((s) => s.key) });
+  const toggleAllRegions = () => {
+    setFilters({ regions: allRegionsActive ? [] : REGIONS.map((r) => r.key) });
   };
 
   const toggleSource = (source: GlobeSource) => {
@@ -108,7 +104,7 @@ export default function FilterPanel() {
       style={{
         position: 'fixed',
         top: 60,
-        left: 16,
+        left: leftOffset,
         width: 260,
         background: '#161b22',
         border: '1px solid #30363d',
@@ -154,8 +150,8 @@ export default function FilterPanel() {
               Event Types
             </span>
             <button
-              data-testid="filter-toggle-all-cats"
-              onClick={toggleAllCats}
+              data-testid="filter-toggle-all-types"
+              onClick={toggleAllTypes}
               style={{
                 background: 'none',
                 border: 'none',
@@ -165,21 +161,21 @@ export default function FilterPanel() {
                 padding: 0,
               }}
             >
-              {allCatsActive ? 'Clear all' : 'Select all'}
+              {allTypesActive ? 'Clear all' : 'Select all'}
             </button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {CATEGORIES.map(({ key, label, color, icon }) => {
-              const active = filters.categories.includes(key);
+            {EVENT_TYPES.map((type) => {
+              const active = filters.eventTypes.includes(type);
+              const color = '#58a6ff';
               return (
                 <button
-                  key={key}
-                  data-testid={`filter-cat-${key}`}
-                  onClick={() => toggleCategory(key)}
+                  key={type}
+                  data-testid={`filter-type-${type.toLowerCase().replace(/\s+/g, '-')}`}
+                  onClick={() => toggleEventType(type)}
                   style={{
                     display: 'flex',
                     alignItems: 'center',
-                    gap: 5,
                     background: active ? `${color}22` : '#0d1117',
                     border: `1px solid ${active ? color : '#30363d'}`,
                     borderRadius: 20,
@@ -191,15 +187,14 @@ export default function FilterPanel() {
                     transition: 'all 0.12s ease',
                   }}
                 >
-                  <span style={{ fontSize: 10 }}>{icon}</span>
-                  {label}
+                  {type}
                 </button>
               );
             })}
           </div>
         </div>
 
-        {/* Severity */}
+        {/* Regions */}
         <div>
           <div
             style={{
@@ -210,28 +205,26 @@ export default function FilterPanel() {
             }}
           >
             <span style={{ color: '#8b949e', fontSize: 11, fontWeight: 600, textTransform: 'uppercase', letterSpacing: 0.8 }}>
-              Severity
+              Regions
             </span>
             <button
-              data-testid="filter-toggle-all-sevs"
-              onClick={toggleAllSevs}
+              data-testid="filter-toggle-all-regions"
+              onClick={toggleAllRegions}
               style={{ background: 'none', border: 'none', color: '#1f6feb', cursor: 'pointer', fontSize: 11, padding: 0 }}
             >
-              {allSevsActive ? 'Clear all' : 'Select all'}
+              {allRegionsActive ? 'Clear all' : 'Select all'}
             </button>
           </div>
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {SEVERITIES.map(({ key, label, color }) => {
-              const active = filters.severities.includes(key);
+            {REGIONS.map(({ key, label }) => {
+              const active = filters.regions.includes(key);
+              const color = '#d29922';
               return (
                 <button
                   key={key}
-                  data-testid={`filter-sev-${key}`}
-                  onClick={() => toggleSeverity(key)}
+                  data-testid={`filter-region-${key}`}
+                  onClick={() => toggleRegion(key)}
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 6,
                     background: active ? `${color}22` : '#0d1117',
                     border: `1px solid ${active ? color : '#30363d'}`,
                     borderRadius: 20,
@@ -243,15 +236,6 @@ export default function FilterPanel() {
                     transition: 'all 0.12s ease',
                   }}
                 >
-                  <span
-                    style={{
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
-                      background: active ? color : '#30363d',
-                      display: 'inline-block',
-                    }}
-                  />
                   {label}
                 </button>
               );
@@ -356,8 +340,7 @@ export default function FilterPanel() {
           <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
             {SOURCES.map(({ key, label }) => {
               const active = filters.sources.includes(key);
-              const isLiveua = key === 'liveuamap';
-              const color = isLiveua ? '#f0883e' : '#58a6ff';
+              const color = '#58a6ff';
               return (
                 <button
                   key={key}

@@ -3,19 +3,7 @@
  * Shows live counts + toggle controls for each tracker type
  */
 import { useStore } from "../store";
-import type {
-  TrackerAffiliation,
-  AircraftGroundMode,
-  AircraftSourceFilter,
-  Filters,
-} from "../store";
-import type { CSSProperties, ReactNode } from "react";
-import {
-  AIRCRAFT_COCOM_ORDER,
-  COCOM_META,
-  emptyAircraftCocomMask,
-  type AircraftCocomId,
-} from "../data/cocoms";
+import type { TrackerAffiliation } from "../store";
 
 const TYPES = [
   {
@@ -50,10 +38,21 @@ const TYPES = [
   },
 ];
 
-const AIRCRAFT_COLOR = "#58a6ff";
-
 export default function TrackerPanel() {
-  const { showTrackers, setShowTrackers, filters, setFilters, setTrackerAffiliation, aircraft, ships, satellites } =
+  const {
+    showTrackers,
+    setShowTrackers,
+    filters,
+    setFilters,
+    setTrackerAffiliation,
+    selectTracker,
+    selectedEvent,
+    selectedTracker,
+    sidebarOpen,
+    aircraft,
+    ships,
+    satellites,
+  } =
     useStore();
 
   if (!showTrackers) return null;
@@ -64,7 +63,9 @@ export default function TrackerPanel() {
     satellites: satellites.length,
   };
 
-  const aircraftOn = filters.trackerTypes.includes("aircraft");
+  const iss = satellites.find((s) => s.id === "sat-25544" || /international space station|iss \(zarya\)/i.test(s.name));
+  const leftOffset = selectedEvent ? 416 : selectedTracker ? 396 : 16;
+  const rightOffset = sidebarOpen || selectedEvent ? 356 : 16;
 
   const toggleType = (key: "aircraft" | "ships" | "satellites") => {
     const current = filters.trackerTypes;
@@ -77,23 +78,24 @@ export default function TrackerPanel() {
       style={{
         position: "fixed",
         bottom: 20,
-        left: "50%",
-        transform: "translateX(-50%)",
+        left: leftOffset,
+        right: rightOffset,
         background: "#161b22",
         border: "1px solid #30363d",
         borderRadius: 10,
         padding: "12px 20px",
         display: "flex",
         flexDirection: "column",
+        alignItems: "center",
         gap: 10,
         zIndex: 500,
         boxShadow: "0 8px 32px rgba(0,0,0,0.5)",
         backdropFilter: "blur(8px)",
-        minWidth: 360,
-        maxWidth: "min(960px, calc(100vw - 32px))",
+        minWidth: 0,
+        maxWidth: "none",
       }}
     >
-      <div style={{ display: "flex", gap: 20, alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 20, alignItems: "center", justifyContent: "center", flexWrap: "wrap", width: "100%" }}>
         <span
           style={{
             color: "#8b949e",
@@ -154,8 +156,75 @@ export default function TrackerPanel() {
                 disabled={!active}
                 value={affiliation}
                 color={color}
+                options={key === "aircraft"
+                  ? [
+                      { id: "all", label: "All" },
+                      { id: "civilian", label: "Civilian" },
+                      { id: "military", label: "Military" },
+                      { id: "airlines", label: "Airlines" },
+                      { id: "other", label: "Other" },
+                    ]
+                  : key === "ships"
+                    ? [
+                        { id: "all", label: "All" },
+                        { id: "commercial", label: "Commercial" },
+                        { id: "military", label: "Military" },
+                        { id: "cargo", label: "Cargo" },
+                        { id: "tanker", label: "Tanker" },
+                        { id: "passenger", label: "Passenger" },
+                        { id: "fishing", label: "Fishing" },
+                        { id: "other", label: "Other" },
+                      ]
+                  : undefined}
                 onChange={(next) => setTrackerAffiliation(key, next)}
               />
+              {key === "satellites" && active && (
+                <div style={{ display: "flex", gap: 4, justifyContent: "center", flexWrap: "wrap" }}>
+                  <button
+                    type="button"
+                    onClick={() => setFilters({ satelliteShowOrbits: !filters.satelliteShowOrbits })}
+                    style={{
+                      border: `1px solid ${filters.satelliteShowOrbits ? color : "#30363d"}`,
+                      color: filters.satelliteShowOrbits ? color : "#8b949e",
+                      background: filters.satelliteShowOrbits ? `${color}1f` : "#0d1117",
+                      borderRadius: 999,
+                      padding: "2px 8px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: "pointer",
+                      textTransform: "uppercase",
+                    }}
+                    data-testid="satellite-toggle-orbits"
+                  >
+                    Orbits {filters.satelliteShowOrbits ? "On" : "Off"}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!iss}
+                    onClick={() => {
+                      if (!iss) return;
+                      selectTracker({ kind: "satellites", data: iss });
+                      window.dispatchEvent(new CustomEvent("focus-satellite", { detail: iss }));
+                    }}
+                    style={{
+                      border: `1px solid ${iss ? color : "#30363d"}`,
+                      color: iss ? color : "#6e7681",
+                      background: iss ? `${color}1f` : "#0d1117",
+                      borderRadius: 999,
+                      padding: "2px 8px",
+                      fontSize: 10,
+                      fontWeight: 700,
+                      cursor: iss ? "pointer" : "default",
+                      opacity: iss ? 1 : 0.55,
+                      textTransform: "uppercase",
+                    }}
+                    title={iss ? "Snap globe camera to the International Space Station" : "ISS not loaded yet"}
+                    data-testid="satellite-focus-iss"
+                  >
+                    ISS
+                  </button>
+                </div>
+              )}
             </div>
           );
         })}
@@ -169,287 +238,16 @@ export default function TrackerPanel() {
             color: "#6e7681",
             cursor: "pointer",
             fontSize: 16,
-            marginLeft: "auto",
             padding: "2px 4px",
             lineHeight: 1,
+            position: "absolute",
+            right: 12,
+            top: 10,
           }}
         >
           ×
         </button>
       </div>
-
-      {aircraftOn && <AircraftOptions filters={filters} setFilters={setFilters} />}
-    </div>
-  );
-}
-
-function AircraftOptions({
-  filters,
-  setFilters,
-}: {
-  filters: Filters;
-  setFilters: (partial: Partial<Filters>) => void;
-}) {
-  const pill = (selected: boolean) => ({
-    border: `1px solid ${selected ? AIRCRAFT_COLOR : "#30363d"}`,
-    color: selected ? AIRCRAFT_COLOR : "#8b949e",
-    background: selected ? "#58a6ff1f" : "#0d1117",
-    borderRadius: 999,
-    padding: "2px 8px",
-    fontSize: 10,
-    fontWeight: 700,
-    cursor: "pointer" as const,
-  });
-
-  const inputStyle: CSSProperties = {
-    width: 64,
-    background: "#0d1117",
-    border: "1px solid #30363d",
-    borderRadius: 4,
-    color: "#e6edf3",
-    fontSize: 11,
-    padding: "4px 6px",
-    fontFamily: "JetBrains Mono, monospace",
-  };
-
-  const textInputStyle: CSSProperties = {
-    ...inputStyle,
-    width: 100,
-  };
-
-  const resetAircraftFilters = () =>
-    setFilters({
-      aircraftGroundMode: "all",
-      aircraftAltMinFt: 0,
-      aircraftAltMaxFt: 60_000,
-      aircraftSpeedMinKt: 0,
-      aircraftSpeedMaxKt: 800,
-      aircraftCallsignQuery: "",
-      aircraftCountryQuery: "",
-      aircraftSourceFilter: "all",
-      aircraftCocoms: emptyAircraftCocomMask(),
-    });
-
-  const toggleCocom = (id: AircraftCocomId) =>
-    setFilters({
-      aircraftCocoms: { ...filters.aircraftCocoms, [id]: !filters.aircraftCocoms[id] },
-    });
-
-  return (
-    <div
-      style={{
-        borderTop: "1px solid #30363d",
-        paddingTop: 10,
-        display: "flex",
-        flexDirection: "column",
-        gap: 10,
-      }}
-    >
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 12, alignItems: "center" }}>
-        <span style={{ color: "#8b949e", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>Flight load</span>
-        <div style={{ display: "flex", gap: 6 }}>
-          {[100, 300, 600, 1000].map((n) => {
-            const selected = filters.aircraftMaxVisible === n;
-            return (
-              <button key={n} onClick={() => setFilters({ aircraftMaxVisible: n })} style={pill(selected)}>
-                {n}
-              </button>
-            );
-          })}
-        </div>
-        <button
-          onClick={() => setFilters({ aircraftShowLabels: !filters.aircraftShowLabels })}
-          style={{
-            ...pill(filters.aircraftShowLabels),
-            borderRadius: 6,
-            textTransform: "uppercase",
-          }}
-        >
-          Labels {filters.aircraftShowLabels ? "On" : "Off"}
-        </button>
-      </div>
-
-      <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-        <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 8 }}>
-          <span style={{ color: "#8b949e", fontSize: 10, fontWeight: 700, textTransform: "uppercase" }}>
-            COCOM AOR
-          </span>
-          <span style={{ color: "#6e7681", fontSize: 10, maxWidth: 420, lineHeight: 1.35 }}>
-            No selection = worldwide. Enable commands to show flights only inside their approximate AORs (union).
-          </span>
-        </div>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center" }}>
-          {AIRCRAFT_COCOM_ORDER.map((id) => {
-            const on = filters.aircraftCocoms[id];
-            const { short, hint } = COCOM_META[id];
-            return (
-              <button
-                key={id}
-                type="button"
-                title={hint}
-                onClick={() => toggleCocom(id)}
-                style={pill(on)}
-              >
-                {short}
-              </button>
-            );
-          })}
-          <button type="button" onClick={() => setFilters({ aircraftCocoms: emptyAircraftCocomMask() })} style={pill(false)}>
-            Clear AOR
-          </button>
-        </div>
-      </div>
-
-      <div style={{ display: "flex", flexWrap: "wrap", gap: 14, alignItems: "flex-end" }}>
-        <Field label="Surface">
-          <div style={{ display: "flex", gap: 4 }}>
-            {(
-              [
-                { id: "all" as const, label: "All" },
-                { id: "airborne" as const, label: "Air" },
-                { id: "ground" as const, label: "GND" },
-              ] satisfies { id: AircraftGroundMode; label: string }[]
-            ).map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setFilters({ aircraftGroundMode: opt.id })}
-                style={pill(filters.aircraftGroundMode === opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Source">
-          <div style={{ display: "flex", gap: 4 }}>
-            {(
-              [
-                { id: "all" as const, label: "All" },
-                { id: "opensky" as const, label: "OpenSky" },
-                { id: "verified" as const, label: "Verified" },
-              ] satisfies { id: AircraftSourceFilter; label: string }[]
-            ).map((opt) => (
-              <button
-                key={opt.id}
-                onClick={() => setFilters({ aircraftSourceFilter: opt.id })}
-                style={pill(filters.aircraftSourceFilter === opt.id)}
-              >
-                {opt.label}
-              </button>
-            ))}
-          </div>
-        </Field>
-
-        <Field label="Alt (ft)">
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <input
-              type="number"
-              min={0}
-              max={60000}
-              value={filters.aircraftAltMinFt}
-              onChange={(e) => setFilters({ aircraftAltMinFt: Number(e.target.value) || 0 })}
-              style={inputStyle}
-            />
-            <span style={{ color: "#6e7681", fontSize: 11 }}>–</span>
-            <input
-              type="number"
-              min={0}
-              max={60000}
-              value={filters.aircraftAltMaxFt}
-              onChange={(e) => setFilters({ aircraftAltMaxFt: Number(e.target.value) || 0 })}
-              style={inputStyle}
-            />
-          </div>
-        </Field>
-
-        <Field label="Speed (kt)">
-          <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
-            <input
-              type="number"
-              min={0}
-              max={2000}
-              value={filters.aircraftSpeedMinKt}
-              onChange={(e) => setFilters({ aircraftSpeedMinKt: Number(e.target.value) || 0 })}
-              style={inputStyle}
-            />
-            <span style={{ color: "#6e7681", fontSize: 11 }}>–</span>
-            <input
-              type="number"
-              min={0}
-              max={2000}
-              value={filters.aircraftSpeedMaxKt}
-              onChange={(e) => setFilters({ aircraftSpeedMaxKt: Number(e.target.value) || 0 })}
-              style={inputStyle}
-            />
-          </div>
-        </Field>
-
-        <Field label="Callsign">
-          <input
-            type="text"
-            placeholder="contains…"
-            value={filters.aircraftCallsignQuery}
-            onChange={(e) => setFilters({ aircraftCallsignQuery: e.target.value })}
-            style={textInputStyle}
-          />
-        </Field>
-
-        <Field label="Country">
-          <input
-            type="text"
-            placeholder="contains…"
-            value={filters.aircraftCountryQuery}
-            onChange={(e) => setFilters({ aircraftCountryQuery: e.target.value })}
-            style={textInputStyle}
-          />
-        </Field>
-
-        <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-          <button
-            type="button"
-            onClick={() =>
-              setFilters({
-                aircraftAltMinFt: 25_000,
-                aircraftAltMaxFt: 45_000,
-                aircraftGroundMode: "airborne",
-                aircraftSpeedMinKt: 200,
-                aircraftSpeedMaxKt: 800,
-              })
-            }
-            style={pill(false)}
-          >
-            Cruise band
-          </button>
-          <button
-            type="button"
-            onClick={() =>
-              setFilters({
-                aircraftGroundMode: "ground",
-                aircraftAltMinFt: 0,
-                aircraftAltMaxFt: 2500,
-                aircraftSpeedMinKt: 0,
-                aircraftSpeedMaxKt: 60,
-              })
-            }
-            style={pill(false)}
-          >
-            Taxi / ramp
-          </button>
-          <button type="button" onClick={resetAircraftFilters} style={pill(false)}>
-            Reset filters
-          </button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Field({ label, children }: { label: string; children: ReactNode }) {
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-      <span style={{ color: "#8b949e", fontSize: 9, fontWeight: 700, textTransform: "uppercase" }}>{label}</span>
-      {children}
     </div>
   );
 }
@@ -459,13 +257,15 @@ function AffiliationPills({
   onChange,
   color,
   disabled,
+  options,
 }: {
   value: TrackerAffiliation;
   onChange: (v: TrackerAffiliation) => void;
   color: string;
   disabled: boolean;
+  options?: { id: TrackerAffiliation; label: string }[];
 }) {
-  const opts: { id: TrackerAffiliation; label: string }[] = [
+  const opts = options ?? [
     { id: "all", label: "All" },
     { id: "civilian", label: "Civilian" },
     { id: "military", label: "Military" },

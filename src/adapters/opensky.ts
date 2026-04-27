@@ -66,8 +66,16 @@ function toAircraft(rows: OpenSkyResponse): Aircraft[] {
   return out;
 }
 
-export async function fetchOpenSkyAircraft(): Promise<Aircraft[]> {
-  const base = "https://opensky-network.org/api/states/all";
+export async function fetchOpenSkyAircraft(bbox?: [number, number, number, number]): Promise<Aircraft[]> {
+  const params = new URLSearchParams();
+  if (bbox) {
+    const [minLon, minLat, maxLon, maxLat] = bbox;
+    params.set("lomin", String(minLon));
+    params.set("lamin", String(minLat));
+    params.set("lomax", String(maxLon));
+    params.set("lamax", String(maxLat));
+  }
+  const base = `https://opensky-network.org/api/states/all${params.size ? `?${params.toString()}` : ""}`;
   const user = process.env.OPENSKY_USERNAME;
   const pass = process.env.OPENSKY_PASSWORD;
   const headers: Record<string, string> = { Accept: "application/json" };
@@ -75,7 +83,8 @@ export async function fetchOpenSkyAircraft(): Promise<Aircraft[]> {
     headers.Authorization = `Basic ${Buffer.from(`${user}:${pass}`).toString("base64")}`;
   }
 
-  return withCache("opensky:states:all", 60_000, async () => {
+  const cacheKey = bbox ? `opensky:states:bbox:${bbox.map((n) => n.toFixed(2)).join(",")}` : "opensky:states:all";
+  return withCache(cacheKey, 60_000, async () => {
     const res = await fetch(base, { headers });
     if (!res.ok) {
       throw new Error(`OpenSky request failed: ${res.status}`);

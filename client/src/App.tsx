@@ -16,10 +16,11 @@ import { textGeoLookup, jitterLatLng } from "./lib/textGeo";
 export default function App() {
   const {
     setEvents, setAircraft, setShips, setSatellites,
-    setLiveuamapStatus,
-    setPerigonStatus,
     setAcledStatus,
+    setGdeltStatus,
+    setAcledPaging,
     activeRegion, filters,
+    aircraftViewportBbox,
     selectedEvent, selectEvent,
     selectedTracker, selectTracker,
   } = useStore();
@@ -33,22 +34,17 @@ export default function App() {
     return `${Math.floor(hours / 24)}d ago`;
   }
 
-  function aircraftBboxForRegion(region: typeof activeRegion): [number, number, number, number] | null {
-    switch (region) {
-      case "Africa":
-        return [-20, -35, 55, 38];
-      case "Asia":
-        return [25, -10, 180, 75];
-      case "Middle East":
-        return [30, 12, 65, 42];
-      case "Europe":
-        return [-25, 34, 45, 72];
-      case "Americas":
-        return [-170, -56, -30, 72];
-      case "Ukraine":
-        return [20, 43, 42, 53];
-      default:
-        return null;
+  async function fetchWithTimeout(
+    input: RequestInfo | URL,
+    init?: RequestInit,
+    timeoutMs = 12_000,
+  ): Promise<Response> {
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), timeoutMs);
+    try {
+      return await fetch(input, { ...(init ?? {}), signal: controller.signal });
+    } finally {
+      window.clearTimeout(timer);
     }
   }
 
@@ -73,6 +69,53 @@ export default function App() {
     if (t.includes("rocket")) return "Rocket Attack";
     if (t.includes("protest")) return "Protest";
     return "Attack";
+  }
+
+  function mapHeadlineType(text?: string): EventType {
+    const t = (text || "").toLowerCase();
+    if (t.includes("missile")) return "Missile Strike";
+    if (t.includes("rocket")) return "Rocket Attack";
+    if (t.includes("drone") || t.includes("uav")) return "Drone Strike";
+    if (t.includes("airstrike") || t.includes("air strike")) return "Airstrike";
+    if (t.includes("bomb") || t.includes("explos")) return "Explosion";
+    if (t.includes("clash") || t.includes("battle") || t.includes("ambush") || t.includes("firefight")) return "Ground Clashes";
+    if (t.includes("maritime") || t.includes("ship") || t.includes("vessel") || t.includes("naval")) return "Maritime Incident";
+    if (t.includes("cyber") || t.includes("ransomware") || t.includes("hack")) return "Cyber";
+    if (t.includes("protest") || t.includes("demonstrat")) return "Protest";
+    if (t.includes("tariff") || t.includes("sanction") || t.includes("inflation") || t.includes("trade")) return "Economic";
+    if (t.includes("law") || t.includes("policy") || t.includes("parliament") || t.includes("senate") || t.includes("election")) {
+      return "Political";
+    }
+    return "Political";
+  }
+
+  function conflictFallbackLocation(text: string): { lat: number; lng: number; name: string } | null {
+    const t = text.toLowerCase();
+    if (/ukrain|kyiv|kharkiv|odesa|donetsk|crimea/.test(t)) {
+      return { lat: 49.0, lng: 31.4, name: "Ukraine" };
+    }
+    if (/russia|moscow|kursk|belgorod/.test(t)) {
+      return { lat: 61.52, lng: 105.32, name: "Russia" };
+    }
+    if (/gaza|rafah|khan younis/.test(t)) {
+      return { lat: 31.5, lng: 34.47, name: "Gaza" };
+    }
+    if (/israel|tel aviv|jerusalem/.test(t)) {
+      return { lat: 31.05, lng: 34.85, name: "Israel" };
+    }
+    if (/iran|tehran/.test(t)) {
+      return { lat: 32.43, lng: 53.69, name: "Iran" };
+    }
+    if (/syria|damascus|aleppo/.test(t)) {
+      return { lat: 34.8, lng: 38.99, name: "Syria" };
+    }
+    if (/lebanon|beirut|hezbollah/.test(t)) {
+      return { lat: 33.85, lng: 35.86, name: "Lebanon" };
+    }
+    if (/yemen|houthi|hodeidah|aden/.test(t)) {
+      return { lat: 15.55, lng: 48.52, name: "Yemen" };
+    }
+    return null;
   }
 
   function liveEntityToGeoEvent(entity: GlobeEntity): GeoEvent {
@@ -135,12 +178,12 @@ export default function App() {
     if (approxGeo) {
       const hit = textGeoLookup(`${title} ${description}`);
       if (hit) {
-        const jittered = jitterLatLng(entity.id, hit.lat, hit.lng);
+        const jittered = jitterLatLng(entity.id, hit.lat, hit.lng, "place");
         lat = jittered.lat;
         lng = jittered.lng;
         locationLabel = hit.name;
       } else {
-        const j = jitterLatLng(entity.id, entity.lat, entity.lon);
+        const j = jitterLatLng(entity.id, entity.lat, entity.lon, "region");
         lat = j.lat;
         lng = j.lng;
       }
@@ -157,7 +200,7 @@ export default function App() {
       lng,
       severity,
       category: mapLiveCategory(entity.category),
-      type: "Political",
+      type: mapHeadlineType(`${title} ${description}`),
       region: locationLabel,
       country: locationLabel,
       source: "Perigon",
@@ -188,7 +231,9 @@ export default function App() {
       "Article from TheNewsAPI.";
 
     const hit = textGeoLookup(`${title} ${description}`);
-    const geo = hit ? jitterLatLng(entity.id, hit.lat, hit.lng) : jitterLatLng(entity.id, entity.lat, entity.lon);
+    const geo = hit
+      ? jitterLatLng(entity.id, hit.lat, hit.lng, "place")
+      : jitterLatLng(entity.id, entity.lat, entity.lon, "region");
     const locationLabel = hit?.name ?? region;
 
     return {
@@ -304,25 +349,33 @@ export default function App() {
       ? "GDELT GEO 2.0 API. Coordinates correspond to the location mentioned in the matching articles."
       : "GDELT DOC API. Location inferred from article text; verify with original reporting.";
 
-    // GDELT DOC gives us only a publisher country centroid. Scan the headline
-    // for a mentioned country or city so a "Russo-Ukraine" article doesn't
-    // land over the outlet's home country.
+    // Prefer exact placement for GDELT points:
+    // - GEO rows are already precise
+    // - DOC rows use direct place-hit coordinates when available (no jitter)
+    // - DOC rows without place-hit keep server-provided coordinates so feed/map stay in sync
     let lat = entity.lat;
     let lng = entity.lon;
     let finalLocation = locationLabel;
     let finalPlaceName = placeName;
     if (!preciseGeo) {
-      const hit = textGeoLookup(title);
+      const relatedCorpus = relatedArticles.slice(0, 4).map((a) => a.title).join(" ");
+      const corpus = `${title} ${description} ${relatedCorpus}`;
+      const hit = textGeoLookup(corpus);
       if (hit) {
-        const jittered = jitterLatLng(entity.id, hit.lat, hit.lng);
-        lat = jittered.lat;
-        lng = jittered.lng;
+        lat = hit.lat;
+        lng = hit.lng;
         finalLocation = hit.name;
         finalPlaceName = hit.name;
       } else {
-        const j = jitterLatLng(entity.id, entity.lat, entity.lon);
-        lat = j.lat;
-        lng = j.lng;
+        // Avoid misleading publisher-country fallback for conflict stories where
+        // text contains obvious location hints the simple matcher may miss.
+        const fallback = conflictFallbackLocation(corpus);
+        if (fallback) {
+          lat = fallback.lat;
+          lng = fallback.lng;
+          finalLocation = fallback.name;
+          finalPlaceName = fallback.name;
+        }
       }
     }
 
@@ -359,173 +412,164 @@ export default function App() {
     };
   }
 
+  function mergeEventsById(preferred: GeoEvent[], extras: GeoEvent[]): GeoEvent[] {
+    const out = new Map<string, GeoEvent>();
+    for (const ev of preferred) out.set(ev.id, ev);
+    for (const ev of extras) {
+      if (!out.has(ev.id)) out.set(ev.id, ev);
+    }
+    return Array.from(out.values());
+  }
+
   useEffect(() => {
     let cancelled = false;
-    let latestLiveEvents: GeoEvent[] = [];
-    let latestPerigonEvents: GeoEvent[] = [];
     let latestGdeltEvents: GeoEvent[] = [];
     let latestAcledEvents: GeoEvent[] = [];
-    let latestAiEvents: GeoEvent[] = [];
-    let latestThenewsEvents: GeoEvent[] = [];
+    const acledHours = filters.timeRangeHours;
+    const acledQueryKey = `${activeRegion}|${acledHours}`;
+
+    setAcledPaging({
+      queryKey: acledQueryKey,
+      nextCursor: null,
+      hasMore: false,
+      loadingMore: false,
+    });
 
     async function loadVerifiedFeeds() {
       try {
-        const shouldPollLiveuamap = true;
-        const shouldPollPerigon = true;
         const shouldPollGdelt = true;
         const shouldPollAcled = true;
+        const shouldPollAi = false;
+        const shouldPollTheNewsApi = false;
         const liveFrom = new Date(Date.now() - filters.timeRangeHours * 3_600_000).toISOString();
         const feedBase = new URLSearchParams();
         feedBase.set("from", liveFrom);
         feedBase.set("to", new Date().toISOString());
 
-        const liveParams = new URLSearchParams(feedBase);
-        liveParams.set("limit", "100");
-
         const newsFeedParams = new URLSearchParams(feedBase);
         newsFeedParams.set("languages", filters.newsLanguages.join(","));
 
-        const aircraftParams = new URLSearchParams();
-        const aircraftFetchLimit = Math.min(
-          2000,
-          Math.max(filters.aircraftMaxVisible * 6, 800),
-        );
-        aircraftParams.set("limit", String(aircraftFetchLimit));
-        const aircraftBbox = aircraftBboxForRegion(activeRegion);
-        if (aircraftBbox) {
-          aircraftParams.set("bbox", aircraftBbox.join(","));
-        }
-
-        const [eventsRes, aircraftRes, shipsRes, satellitesRes] = await Promise.all([
-          fetch("/api/events"),
-          fetch(`/api/trackers/aircraft?${aircraftParams.toString()}`),
-          fetch("/api/trackers/ships"),
-          fetch("/api/trackers/satellites"),
-        ]);
-
-        if (!eventsRes.ok || !aircraftRes.ok || !shipsRes.ok || !satellitesRes.ok) {
-          throw new Error("One or more verified feeds failed");
-        }
-
-        const [events, aircraft, ships, satellites] = await Promise.all([
-          eventsRes.json() as Promise<GeoEvent[]>,
-          aircraftRes.json() as Promise<Aircraft[]>,
-          shipsRes.json() as Promise<Ship[]>,
-          satellitesRes.json() as Promise<Satellite[]>,
-        ]);
-
-        let liveEvents: GeoEvent[] = latestLiveEvents;
-        if (shouldPollLiveuamap) {
+        const loadSatellites = async (): Promise<Satellite[]> => {
           try {
-            const liveuamapRes = await fetch(`/api/liveuamap/events?${liveParams.toString()}`);
-            if (liveuamapRes.ok) {
-              const payload = (await liveuamapRes.json()) as { entities?: GlobeEntity[] };
-              liveEvents = (payload.entities ?? []).map(liveEntityToGeoEvent);
-              latestLiveEvents = liveEvents;
-              setLiveuamapStatus({
-                state: "enabled",
-                message: `Liveuamap connected (${liveEvents.length} events)`,
-                lastUpdated: new Date().toISOString(),
-              });
-            } else if (liveuamapRes.status === 503) {
-              const payload = (await liveuamapRes.json()) as { reason?: string };
-              setLiveuamapStatus({
-                state: "disabled",
-                message: payload.reason ?? "Liveuamap disabled",
-              });
-            } else {
-              setLiveuamapStatus({
-                state: "error",
-                message: `Liveuamap request failed (${liveuamapRes.status})`,
-              });
+            const satellitesRes = await fetchWithTimeout("/api/trackers/satellites");
+            if (!satellitesRes.ok) {
+              console.warn("[feeds] satellites HTTP", satellitesRes.status, "— keeping prior TLEs");
+              return useStore.getState().satellites;
             }
-          } catch (_err) {
-            setLiveuamapStatus({
-              state: "error",
-              message: "Liveuamap request failed (network/error)",
-            });
+            return (await satellitesRes.json()) as Satellite[];
+          } catch (e) {
+            console.warn("[feeds] satellites request failed — keeping prior TLEs", e);
+            return useStore.getState().satellites;
           }
-        }
+        };
 
-        let perigonEvents: GeoEvent[] = latestPerigonEvents;
-        if (shouldPollPerigon) {
-          try {
-            const perigonRes = await fetch(`/api/perigon/events?${newsFeedParams.toString()}`);
-            if (perigonRes.ok) {
-              const payload = (await perigonRes.json()) as { entities?: GlobeEntity[] };
-              perigonEvents = (payload.entities ?? []).map(perigonEntityToGeoEvent);
-              latestPerigonEvents = perigonEvents;
-              setPerigonStatus({
-                state: "enabled",
-                message: `Perigon: ${perigonEvents.length} articles`,
-                lastUpdated: new Date().toISOString(),
-              });
-            } else if (perigonRes.status === 503) {
-              const payload = (await perigonRes.json().catch(() => ({}))) as { reason?: string };
-              latestPerigonEvents = [];
-              perigonEvents = [];
-              setPerigonStatus({
-                state: "disabled",
-                message: payload.reason ?? "Add PERIGON_API_KEY to .env and restart the server",
-              });
-            } else {
-              const payload = (await perigonRes.json().catch(() => ({}))) as { message?: string };
-              latestPerigonEvents = [];
-              perigonEvents = [];
-              setPerigonStatus({
-                state: "error",
-                message: payload.message ?? `Perigon failed (${perigonRes.status})`,
-              });
-            }
-          } catch (_err) {
-            latestPerigonEvents = [];
-            perigonEvents = [];
-            setPerigonStatus({
-              state: "error",
-              message: "Perigon request failed (network)",
-            });
-          }
-        }
-
-        let gdeltEvents: GeoEvent[] = latestGdeltEvents;
-        if (shouldPollGdelt) {
+        const loadGdeltBatch = async (): Promise<GeoEvent[]> => {
+          if (!shouldPollGdelt) return latestGdeltEvents;
+          let gdeltEvents: GeoEvent[] = latestGdeltEvents;
           try {
             const gdeltParams = new URLSearchParams(newsFeedParams);
-            gdeltParams.delete("keyword");
-            gdeltParams.set("limit", "80");
-            const gdeltRes = await fetch(`/api/gdelt/events?${gdeltParams.toString()}`);
+            gdeltParams.set("conflictNews", "1");
+            gdeltParams.set("languages", filters.newsLanguages.join(","));
+            // Ask for more rows as the user widens the event window.
+            const gdeltLimit = Math.min(
+              400,
+              Math.max(180, Math.round(filters.timeRangeHours * 6)),
+            );
+            gdeltParams.set("limit", String(gdeltLimit));
+            const gdeltRes = await fetchWithTimeout(
+              `/api/gdelt/events?${gdeltParams.toString()}`,
+              undefined,
+              32_000,
+            );
             if (gdeltRes.ok) {
               const payload = (await gdeltRes.json()) as { entities?: GlobeEntity[] };
               gdeltEvents = (payload.entities ?? []).map(gdeltEntityToGeoEvent);
               latestGdeltEvents = gdeltEvents;
+              setGdeltStatus({
+                state: "enabled",
+                message:
+                  gdeltEvents.length > 0
+                    ? `${gdeltEvents.length} events`
+                    : "0 events (upstream empty/rate-limited)",
+                lastUpdated: new Date().toISOString(),
+              });
             } else if (gdeltRes.status === 503) {
               latestGdeltEvents = [];
               gdeltEvents = [];
+              setGdeltStatus({
+                state: "disabled",
+                message: "GDELT disabled by server env",
+              });
             } else {
-              latestGdeltEvents = [];
-              gdeltEvents = [];
+              // Keep last successful GDELT rows on transient upstream failures so
+              // the map does not appear to "flip" between sources.
+              gdeltEvents = latestGdeltEvents;
+              setGdeltStatus({
+                state: "error",
+                message:
+                  latestGdeltEvents.length > 0
+                    ? `GDELT failed (${gdeltRes.status}) — showing last ${latestGdeltEvents.length}`
+                    : `GDELT failed (${gdeltRes.status})`,
+              });
             }
           } catch (_err) {
-            latestGdeltEvents = [];
-            gdeltEvents = [];
+            gdeltEvents = latestGdeltEvents;
+            setGdeltStatus({
+              state: "error",
+              message:
+                latestGdeltEvents.length > 0
+                  ? `GDELT request failed — showing last ${latestGdeltEvents.length}`
+                  : "GDELT request failed (network/upstream)",
+            });
           }
-        }
+          return gdeltEvents;
+        };
 
-        let acledEvents: GeoEvent[] = latestAcledEvents;
-        if (shouldPollAcled) {
+        const loadAcledBatch = async (): Promise<GeoEvent[]> => {
+          if (!shouldPollAcled) return latestAcledEvents;
+          let acledEvents: GeoEvent[] = latestAcledEvents;
           try {
-            const acledParams = new URLSearchParams(feedBase);
-            acledParams.delete("keyword");
-            acledParams.set("limit", "120");
-            const acledRes = await fetch(`/api/acled/events?${acledParams.toString()}`);
+            const acledParams = new URLSearchParams();
+            // Pull maximum available ACLED rows regardless age; account tier controls recency.
+            acledParams.set("limit", "5000");
+            const acledRes = await fetchWithTimeout(
+              `/api/acled/events?${acledParams.toString()}`,
+              undefined,
+              75_000,
+            );
             if (acledRes.ok) {
-              const payload = (await acledRes.json()) as { entities?: GlobeEntity[] };
-              acledEvents = (payload.entities ?? []).map(acledEntityToGeoEvent);
-              latestAcledEvents = acledEvents;
+              const payload = (await acledRes.json()) as {
+                entities?: GlobeEntity[];
+                nextCursor?: string | null;
+              };
+              const firstPage = (payload.entities ?? []).map(acledEntityToGeoEvent);
+              const state = useStore.getState();
+              const canReuseExisting = state.acledQueryKey === acledQueryKey;
+              const existingAcled = canReuseExisting
+                ? state.events.filter((ev) => ev.source === "ACLED")
+                : [];
+              const merged = mergeEventsById(firstPage, existingAcled);
+              const preservedCursor =
+                canReuseExisting && existingAcled.length > firstPage.length
+                  ? String(existingAcled.length)
+                  : (payload.nextCursor ?? null);
+              const preservedHasMore =
+                canReuseExisting && existingAcled.length > firstPage.length
+                  ? state.acledHasMore
+                  : Boolean(payload.nextCursor);
+
+              acledEvents = merged;
+              latestAcledEvents = merged;
               setAcledStatus({
                 state: "enabled",
-                message: `ACLED: ${acledEvents.length} events`,
+                message: `${merged.length} events`,
                 lastUpdated: new Date().toISOString(),
+              });
+              setAcledPaging({
+                queryKey: acledQueryKey,
+                nextCursor: preservedCursor,
+                hasMore: preservedHasMore,
+                loadingMore: false,
               });
             } else if (acledRes.status === 503) {
               const payload = (await acledRes.json().catch(() => ({}))) as { reason?: string };
@@ -533,30 +577,51 @@ export default function App() {
               acledEvents = [];
               setAcledStatus({
                 state: "disabled",
-                message: payload.reason ?? "Set ACLED_EMAIL and ACLED_PASSWORD in .env",
+                message:
+                  payload.reason ??
+                  "Set ACLED_ACCESS_KEY + ACLED_EMAIL_ADDRESS (developer API) or ACLED_EMAIL + ACLED_PASSWORD (OAuth) in .env",
+              });
+              setAcledPaging({
+                queryKey: acledQueryKey,
+                nextCursor: null,
+                hasMore: false,
+                loadingMore: false,
               });
             } else {
               const payload = (await acledRes.json().catch(() => ({}))) as { message?: string };
-              latestAcledEvents = [];
-              acledEvents = [];
+              // Keep last successful ACLED rows on transient failures so both
+              // sources remain visible together.
+              acledEvents = latestAcledEvents;
               setAcledStatus({
                 state: "error",
-                message: payload.message ?? `ACLED failed (${acledRes.status})`,
+                message:
+                  latestAcledEvents.length > 0
+                    ? `${payload.message ?? `ACLED failed (${acledRes.status})`} — showing last ${latestAcledEvents.length}`
+                    : (payload.message ?? `ACLED failed (${acledRes.status})`),
               });
             }
           } catch (_err) {
-            latestAcledEvents = [];
-            acledEvents = [];
+            acledEvents = latestAcledEvents;
             setAcledStatus({
               state: "error",
-              message: "ACLED request failed (network)",
+              message:
+                latestAcledEvents.length > 0
+                  ? `ACLED request failed — showing last ${latestAcledEvents.length}`
+                  : "ACLED request failed (network)",
             });
           }
-        }
+          return acledEvents;
+        };
 
-        let aiEvents: GeoEvent[] = latestAiEvents;
-        try {
-          const aiRes = await fetch(`/api/ai/events?${newsFeedParams.toString()}`);
+        const [satellites, gdeltEvents, acledEvents] = await Promise.all([
+          loadSatellites(),
+          loadGdeltBatch(),
+          loadAcledBatch(),
+        ]);
+
+        let aiEvents: GeoEvent[] = [];
+        if (shouldPollAi) {
+          const aiRes = await fetchWithTimeout(`/api/ai/events?${newsFeedParams.toString()}`, undefined, 10_000);
           if (aiRes.ok) {
             const payload = (await aiRes.json()) as { entities?: GlobeEntity[] };
             aiEvents = (payload.entities ?? []).map((entity) => {
@@ -595,68 +660,45 @@ export default function App() {
                 },
               } satisfies GeoEvent;
             });
-            latestAiEvents = aiEvents;
-          } else {
-            aiEvents = [];
-            latestAiEvents = [];
           }
-        } catch (_err) {
-          aiEvents = [];
-          latestAiEvents = [];
         }
 
-        let thenewsEvents: GeoEvent[] = latestThenewsEvents;
-        try {
-          const thenewsRes = await fetch(`/api/thenewsapi/events?${newsFeedParams.toString()}`);
+        let thenewsEvents: GeoEvent[] = [];
+        if (shouldPollTheNewsApi) {
+          const thenewsRes = await fetchWithTimeout(
+            `/api/thenewsapi/events?${newsFeedParams.toString()}`,
+          );
           if (thenewsRes.ok) {
             const payload = (await thenewsRes.json()) as { entities?: GlobeEntity[] };
             thenewsEvents = (payload.entities ?? []).map(thenewsapiEntityToGeoEvent);
-            latestThenewsEvents = thenewsEvents;
-          } else {
-            thenewsEvents = [];
-            latestThenewsEvents = [];
           }
-        } catch (_err) {
-          thenewsEvents = [];
-          latestThenewsEvents = [];
         }
 
         if (cancelled) return;
         setEvents([
-          ...aiEvents,
-          ...thenewsEvents,
-          ...liveEvents,
-          ...perigonEvents,
           ...gdeltEvents,
           ...acledEvents,
-          ...events,
         ]);
-        setAircraft(aircraft);
-        setShips(ships);
         setSatellites(satellites);
       } catch (_err) {
         if (cancelled) return;
         setEvents([]);
-        setAircraft([]);
-        setShips([]);
         setSatellites([]);
-        latestLiveEvents = [];
-        latestPerigonEvents = [];
         latestGdeltEvents = [];
         latestAcledEvents = [];
-        latestAiEvents = [];
-        latestThenewsEvents = [];
-        setLiveuamapStatus({
-          state: "error",
-          message: "Failed loading one or more feeds",
-        });
-        setPerigonStatus({
-          state: "error",
-          message: "Failed loading one or more feeds",
-        });
         setAcledStatus({
           state: "error",
           message: "Failed loading one or more feeds",
+        });
+        setGdeltStatus({
+          state: "error",
+          message: "Failed loading one or more feeds",
+        });
+        setAcledPaging({
+          queryKey: acledQueryKey,
+          nextCursor: null,
+          hasMore: false,
+          loadingMore: false,
         });
       }
     }
@@ -670,8 +712,81 @@ export default function App() {
   }, [
     activeRegion,
     filters.timeRangeHours,
-    filters.aircraftMaxVisible,
     filters.newsLanguages.join(","),
+  ]);
+
+  useEffect(() => {
+    if (!filters.trackerTypes.includes("aircraft")) {
+      setAircraft([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadAircraftInView() {
+      const params = new URLSearchParams();
+      params.set("limit", String(Math.max(12_000, filters.aircraftMaxVisible)));
+      if (aircraftViewportBbox) {
+        params.set("bbox", aircraftViewportBbox.join(","));
+      }
+
+      try {
+        const res = await fetchWithTimeout(`/api/trackers/aircraft?${params.toString()}`, undefined, 22_000);
+        if (!res.ok) throw new Error(`Aircraft feed failed (${res.status})`);
+        const aircraft = await res.json() as Aircraft[];
+        if (!cancelled) setAircraft(aircraft);
+      } catch {
+        // Keep the previous view's aircraft briefly rather than flickering to empty on transient feed errors.
+      }
+    }
+
+    void loadAircraftInView();
+    const timer = window.setInterval(loadAircraftInView, 5_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    [...filters.trackerTypes].sort().join(","),
+    aircraftViewportBbox?.join(","),
+    filters.aircraftMaxVisible,
+  ]);
+
+  useEffect(() => {
+    if (!filters.trackerTypes.includes("ships")) {
+      setShips([]);
+      return;
+    }
+
+    let cancelled = false;
+
+    async function loadShipsInView() {
+      const params = new URLSearchParams();
+      params.set("limit", String(Math.max(12_000, filters.shipsMaxVisible)));
+      if (aircraftViewportBbox) {
+        params.set("bbox", aircraftViewportBbox.join(","));
+      }
+
+      try {
+        const res = await fetchWithTimeout(`/api/trackers/ships?${params.toString()}`, undefined, 28_000);
+        if (!res.ok) throw new Error(`Ship feed failed (${res.status})`);
+        const ships = await res.json() as Ship[];
+        if (!cancelled) setShips(ships);
+      } catch {
+        // Keep previous ships on transient provider errors.
+      }
+    }
+
+    void loadShipsInView();
+    const timer = window.setInterval(loadShipsInView, 8_000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    [...filters.trackerTypes].sort().join(","),
+    aircraftViewportBbox?.join(","),
+    filters.shipsMaxVisible,
   ]);
 
   return (

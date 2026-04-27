@@ -1,26 +1,32 @@
 import { create } from "zustand";
-import type { GeoEvent, Severity, Category } from "./data/events";
+import type { GeoEvent, EventType } from "./data/events";
 import type { Aircraft, Ship, Satellite } from "./data/trackers";
 import type { GlobeSource } from "../../src/types/globe";
 import type { AircraftCocomMask } from "./data/cocoms";
 import { emptyAircraftCocomMask } from "./data/cocoms";
+import type { RegionFilterKey } from "./lib/eventFilters";
+import { EVENT_TYPE_FILTERS, REGION_FILTERS } from "./lib/eventFilters";
+import type { MapLayer as CesiumMapLayer } from "./lib/cesium";
 
-export type MapLayer =
-  | "osm"
-  | "carto-dark"
-  | "esri-street"
-  | "carto-light"
-  | "xml-google-sat"
-  | "xml-google-hybrid"
-  | "xml-google-terrain"
-  | "xml-noaa-rnc";
+export type MapLayer = CesiumMapLayer;
 export type ActiveRegion = "Global" | "Ukraine" | "Middle East" | "Asia" | "Africa" | "Americas" | "Europe";
 
 // Tracker type keys used in filter toggles
 export type TrackerType = "aircraft" | "ships" | "satellites";
-export type TrackerAffiliation = "all" | "civilian" | "military";
+export type TrackerAffiliation =
+  | "all"
+  | "civilian"
+  | "military"
+  | "airlines"
+  | "commercial"
+  | "cargo"
+  | "tanker"
+  | "passenger"
+  | "fishing"
+  | "other";
 export type AircraftGroundMode = "all" | "airborne" | "ground";
 export type AircraftSourceFilter = "all" | "opensky" | "verified";
+export type ViewBbox = [number, number, number, number];
 export type TrackerSelection =
   | { kind: "aircraft"; data: Aircraft }
   | { kind: "ships"; data: Ship }
@@ -28,11 +34,13 @@ export type TrackerSelection =
 
 export interface Filters {
   // Use arrays for easy iteration/serialization
-  categories: Category[];
-  severities: Severity[];
+  eventTypes: EventType[];
+  regions: RegionFilterKey[];
   trackerTypes: TrackerType[];
   trackerAffiliations: Record<TrackerType, TrackerAffiliation>;
   aircraftMaxVisible: number;
+  /** Cap ship billboards (performance); API may return more before slice. */
+  shipsMaxVisible: number;
   aircraftShowLabels: boolean;
   aircraftGroundMode: AircraftGroundMode;
   aircraftAltMinFt: number;
@@ -44,6 +52,7 @@ export interface Filters {
   aircraftSourceFilter: AircraftSourceFilter;
   /** When all false, aircraft are not limited by COCOM AOR. Any true = show only inside union of enabled AORs. */
   aircraftCocoms: AircraftCocomMask;
+  satelliteShowOrbits: boolean;
   sources: GlobeSource[];
   timeRangeHours: number;
   /** ISO 639-1 codes for news feeds. Default English only. */
@@ -61,9 +70,11 @@ interface AppState {
   aircraft: Aircraft[];
   ships: Ship[];
   satellites: Satellite[];
+  aircraftViewportBbox: ViewBbox | null;
   setAircraft: (d: Aircraft[]) => void;
   setShips: (d: Ship[]) => void;
   setSatellites: (d: Satellite[]) => void;
+  setAircraftViewportBbox: (bbox: ViewBbox | null) => void;
 
   // Events
   events: GeoEvent[];
@@ -98,20 +109,40 @@ interface AppState {
     message: string;
     lastUpdated?: string;
   }) => void;
+  gdeltStatus: {
+    state: "idle" | "enabled" | "disabled" | "error";
+    message: string;
+    lastUpdated?: string;
+  };
+  setGdeltStatus: (status: {
+    state: "idle" | "enabled" | "disabled" | "error";
+    message: string;
+    lastUpdated?: string;
+  }) => void;
+  acledNextCursor: string | null;
+  acledHasMore: boolean;
+  acledLoadingMore: boolean;
+  acledQueryKey: string;
+  setAcledPaging: (partial: {
+    nextCursor?: string | null;
+    hasMore?: boolean;
+    loadingMore?: boolean;
+    queryKey?: string;
+  }) => void;
 
   // Filters
   filters: Filters;
   setFilters: (partial: Partial<Filters>) => void;
   setTrackerAffiliation: (t: TrackerType, a: TrackerAffiliation) => void;
   setTimeRangeHours: (h: number) => void;
-  toggleCategory: (c: Category) => void;
-  toggleSeverity: (s: Severity) => void;
 
   // Selection
   selectedEvent: GeoEvent | null;
   selectEvent: (e: GeoEvent | null) => void;
   selectedTracker: TrackerSelection | null;
   selectTracker: (t: TrackerSelection | null) => void;
+  watchlistEventIds: string[];
+  toggleWatchlistEvent: (eventId: string) => void;
 
   // Panels — consistent naming: show* + setShow*
   sidebarOpen: boolean;
@@ -124,33 +155,29 @@ interface AppState {
   setShowFilters: (v: boolean) => void;
 }
 
-const ALL_CATEGORIES: Category[] = ["conflict", "domestic", "local", "social"];
-const ALL_SEVERITIES: Severity[] = ["critical", "high", "medium", "low"];
 const DEFAULT_TRACKER_TYPES: TrackerType[] = [];
 const ALL_SOURCES: GlobeSource[] = [
   "acled",
   "gdelt",
-  "liveuamap",
-  "perigon",
-  "ai",
-  "thenewsapi",
 ];
 
 export const useStore = create<AppState>((set) => ({
   // Map
   mapLayer: "xml-google-sat",
   setMapLayer: (mapLayer) => set({ mapLayer }),
-  activeRegion: "Global",
+  activeRegion: "Americas",
   setActiveRegion: (activeRegion) => set({ activeRegion }),
 
   // Data
   aircraft: [],
   ships: [],
   satellites: [],
+  aircraftViewportBbox: [-170, -56, -30, 72],
   events: [],
   setAircraft: (aircraft) => set({ aircraft }),
   setShips: (ships) => set({ ships }),
   setSatellites: (satellites) => set({ satellites }),
+  setAircraftViewportBbox: (aircraftViewportBbox) => set({ aircraftViewportBbox }),
   setEvents: (events) => set({ events }),
   liveuamapStatus: { state: "idle", message: "Not checked yet" },
   setLiveuamapStatus: (liveuamapStatus) => set({ liveuamapStatus }),
@@ -158,18 +185,34 @@ export const useStore = create<AppState>((set) => ({
   setPerigonStatus: (perigonStatus) => set({ perigonStatus }),
   acledStatus: { state: "idle", message: "Not checked yet" },
   setAcledStatus: (acledStatus) => set({ acledStatus }),
+  gdeltStatus: { state: "idle", message: "Not checked yet" },
+  setGdeltStatus: (gdeltStatus) => set({ gdeltStatus }),
+  acledNextCursor: null,
+  acledHasMore: false,
+  acledLoadingMore: false,
+  acledQueryKey: "",
+  setAcledPaging: (partial) =>
+    set((s) => ({
+      acledNextCursor:
+        partial.nextCursor !== undefined ? partial.nextCursor : s.acledNextCursor,
+      acledHasMore: partial.hasMore !== undefined ? partial.hasMore : s.acledHasMore,
+      acledLoadingMore:
+        partial.loadingMore !== undefined ? partial.loadingMore : s.acledLoadingMore,
+      acledQueryKey: partial.queryKey !== undefined ? partial.queryKey : s.acledQueryKey,
+    })),
 
   // Filters
   filters: {
-    categories: [...ALL_CATEGORIES],
-    severities: [...ALL_SEVERITIES],
+    eventTypes: [...EVENT_TYPE_FILTERS],
+    regions: REGION_FILTERS.map((r) => r.key),
     trackerTypes: [...DEFAULT_TRACKER_TYPES],
     trackerAffiliations: {
       aircraft: "all",
       ships: "all",
       satellites: "all",
     },
-    aircraftMaxVisible: 300,
+    aircraftMaxVisible: 25_000,
+    shipsMaxVisible: 25_000,
     aircraftShowLabels: false,
     aircraftGroundMode: "all",
     aircraftAltMinFt: 0,
@@ -180,6 +223,7 @@ export const useStore = create<AppState>((set) => ({
     aircraftCountryQuery: "",
     aircraftSourceFilter: "all",
     aircraftCocoms: emptyAircraftCocomMask(),
+    satelliteShowOrbits: false,
     sources: [...ALL_SOURCES],
     // Default news window: last 24 hours.
     timeRangeHours: 24,
@@ -199,26 +243,22 @@ export const useStore = create<AppState>((set) => ({
     })),
   setTimeRangeHours: (timeRangeHours) =>
     set((s) => ({ filters: { ...s.filters, timeRangeHours } })),
-  toggleCategory: (c) =>
-    set((s) => {
-      const cats = s.filters.categories.includes(c)
-        ? s.filters.categories.filter((x) => x !== c)
-        : [...s.filters.categories, c];
-      return { filters: { ...s.filters, categories: cats } };
-    }),
-  toggleSeverity: (sv) =>
-    set((s) => {
-      const sevs = s.filters.severities.includes(sv)
-        ? s.filters.severities.filter((x) => x !== sv)
-        : [...s.filters.severities, sv];
-      return { filters: { ...s.filters, severities: sevs } };
-    }),
 
   // Selection
   selectedEvent: null,
   selectEvent: (selectedEvent) => set({ selectedEvent, sidebarOpen: true }),
   selectedTracker: null,
   selectTracker: (selectedTracker) => set({ selectedTracker }),
+  watchlistEventIds: [],
+  toggleWatchlistEvent: (eventId) =>
+    set((s) => {
+      const has = s.watchlistEventIds.includes(eventId);
+      return {
+        watchlistEventIds: has
+          ? s.watchlistEventIds.filter((id) => id !== eventId)
+          : [...s.watchlistEventIds, eventId],
+      };
+    }),
 
   // Panels
   sidebarOpen: true,

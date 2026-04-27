@@ -23,6 +23,14 @@ export interface Ship {
   name: string;
   flag: string;
   type: string;
+  mmsi?: string;
+  imo?: string;
+  callsign?: string;
+  vesselClass?: string;
+  owner?: string;
+  operator?: string;
+  eta?: string;
+  navStatus?: string;
   lat: number;
   lng: number;
   speed: number; // knots
@@ -40,6 +48,7 @@ export interface Satellite {
   name: string;
   country: string;
   category: "communications" | "weather" | "military" | "navigation" | "scientific";
+  affiliation?: "civilian" | "military";
   orbit: "LEO" | "MEO" | "GEO" | "HEO";
   lat: number;
   lng: number;

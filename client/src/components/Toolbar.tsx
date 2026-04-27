@@ -2,8 +2,18 @@ import { useStore } from "../store";
 import { MAP_LAYERS } from "../lib/cesium";
 import type { ActiveRegion } from "../store";
 import type { MapLayer } from "../store";
+import {
+  connectSpaceMouse,
+  disconnectSpaceMouse,
+  getControlConfig,
+  getDebugState,
+  resetControlConfig,
+  setControlConfig,
+  getStatus,
+} from "../lib/spacemouse";
+import { useEffect, useState } from "react";
 
-const REGIONS: ActiveRegion[] = ["Global", "Ukraine", "Middle East", "Asia", "Africa", "Americas", "Europe"];
+const REGIONS: ActiveRegion[] = ["Middle East", "Asia", "Africa", "Americas", "Europe"];
 
 export function Toolbar() {
   const {
@@ -13,10 +23,63 @@ export function Toolbar() {
     setShowTrackers, showTrackers,
     setShowFilters, showFilters,
     sidebarOpen, setSidebarOpen,
-    events,
   } = useStore();
+  const [spaceMouseStatus, setSpaceMouseStatus] = useState(() => getStatus());
+  const [spaceMouseBusy, setSpaceMouseBusy] = useState(false);
+  const [spaceMouseDebug, setSpaceMouseDebug] = useState(() => getDebugState());
+  const [spaceMouseTuneOpen, setSpaceMouseTuneOpen] = useState(false);
+  const [spaceMouseControl, setSpaceMouseControlState] = useState(() => getControlConfig());
 
-  const liveCount = events.filter(e => e.category === "conflict").length;
+  useEffect(() => {
+    const onStatus = (ev: Event) => {
+      const detail = (ev as CustomEvent<ReturnType<typeof getStatus>>).detail;
+      if (detail) setSpaceMouseStatus(detail);
+      else setSpaceMouseStatus(getStatus());
+    };
+    window.addEventListener("spacemouse-status", onStatus);
+    return () => window.removeEventListener("spacemouse-status", onStatus);
+  }, []);
+
+  useEffect(() => {
+    const onDebug = (ev: Event) => {
+      const detail = (ev as CustomEvent<ReturnType<typeof getDebugState>>).detail;
+      if (detail) setSpaceMouseDebug(detail);
+      else setSpaceMouseDebug(getDebugState());
+    };
+    window.addEventListener("spacemouse-debug", onDebug);
+    return () => window.removeEventListener("spacemouse-debug", onDebug);
+  }, []);
+
+  useEffect(() => {
+    const onConfig = (ev: Event) => {
+      const detail = (ev as CustomEvent<ReturnType<typeof getControlConfig>>).detail;
+      if (detail) setSpaceMouseControlState(detail);
+      else setSpaceMouseControlState(getControlConfig());
+    };
+    window.addEventListener("spacemouse-config", onConfig);
+    return () => window.removeEventListener("spacemouse-config", onConfig);
+  }, []);
+
+  async function toggleSpaceMouse() {
+    if (spaceMouseBusy) return;
+    setSpaceMouseBusy(true);
+    try {
+      if (spaceMouseStatus.connected) {
+        setSpaceMouseStatus(await disconnectSpaceMouse());
+      } else {
+        setSpaceMouseStatus(await connectSpaceMouse());
+      }
+    } catch {
+      setSpaceMouseStatus(getStatus());
+    } finally {
+      setSpaceMouseBusy(false);
+    }
+  }
+
+  function updateSpaceMouseControl(partial: Partial<ReturnType<typeof getControlConfig>>) {
+    const next = setControlConfig(partial);
+    setSpaceMouseControlState(next);
+  }
 
   return (
     <div
@@ -44,7 +107,7 @@ export function Toolbar() {
           <button
             key={r}
             onClick={() => setActiveRegion(r)}
-            className={`shrink-0 px-3 h-7 rounded text-xs font-medium transition-all ${
+            className={`shrink-0 px-2 h-6 rounded text-[11px] font-medium transition-all ${
               activeRegion === r
                 ? "bg-[#1f6feb] text-white"
                 : "text-[#8b949e] hover:text-white hover:bg-[#21262d] border border-[#30363d]"
@@ -111,7 +174,7 @@ export function Toolbar() {
             <rect x="1" y="6" width="9" height="2" rx="1" fill="currentColor"/>
             <rect x="1" y="10" width="11" height="2" rx="1" fill="currentColor"/>
           </svg>
-          <span>Events {liveCount > 0 && <span className="text-red-400">({liveCount})</span>}</span>
+          <span>Events</span>
         </ToolbarBtn>
 
         {/* PDB */}
@@ -128,7 +191,124 @@ export function Toolbar() {
           </svg>
           <span>Daily Brief</span>
         </button>
+
+        <button
+          onClick={toggleSpaceMouse}
+          disabled={!spaceMouseStatus.supported || spaceMouseBusy}
+          className={`flex items-center gap-1.5 h-7 px-3 rounded text-xs font-medium transition-colors ${
+            spaceMouseStatus.connected
+              ? "bg-[#238636] text-white hover:bg-[#2ea043]"
+              : "bg-[#161b22] text-[#c9d1d9] border border-[#30363d] hover:bg-[#21262d]"
+          } disabled:opacity-50 disabled:cursor-not-allowed`}
+          data-testid="btn-spacemouse"
+          title={`${spaceMouseStatus.label} | reports:${spaceMouseDebug.reportCount} lastId:${spaceMouseDebug.lastReportId} bytes:${spaceMouseDebug.lastReportBytes}`}
+        >
+          <span>{spaceMouseBusy ? "..." : "3D Mouse"}</span>
+        </button>
+        <button
+          onClick={() => setSpaceMouseTuneOpen((v) => !v)}
+          className={`h-7 px-2 rounded text-xs font-medium border transition-colors ${
+            spaceMouseTuneOpen
+              ? "bg-[#1f6feb]/20 text-[#58a6ff] border-[#1f6feb]/40"
+              : "bg-[#161b22] text-[#8b949e] border-[#30363d] hover:bg-[#21262d] hover:text-[#e6edf3]"
+          }`}
+          title="Tune 3D Mouse camera controls"
+          data-testid="btn-spacemouse-tune"
+        >
+          3D Tune
+        </button>
       </div>
+      {spaceMouseTuneOpen && (
+        <div
+          className="absolute top-14 right-3 w-[280px] rounded border border-[#30363d] bg-[#161b22] p-3 shadow-xl"
+          data-testid="spacemouse-tune-panel"
+        >
+          <div className="mb-2 text-xs font-semibold text-[#e6edf3]">3D Mouse Camera Tune</div>
+          <div className="space-y-2 text-[11px] text-[#8b949e]">
+            <label className="block">
+              Camera mode
+              <select
+                value={spaceMouseControl.cameraMode}
+                onChange={(e) =>
+                  updateSpaceMouseControl({
+                    cameraMode: e.target.value as ReturnType<typeof getControlConfig>["cameraMode"],
+                  })
+                }
+                className="mt-1 h-7 w-full rounded border border-[#30363d] bg-[#0d1117] px-2 text-xs text-[#e6edf3]"
+              >
+                <option value="helicopter">Helicopter (leveled)</option>
+                <option value="cinematic">Cinematic (full 6-DOF)</option>
+              </select>
+            </label>
+            <label className="block">
+              Move speed: {spaceMouseControl.moveSpeed.toFixed(2)}x
+              <input
+                type="range"
+                min={0.2}
+                max={3}
+                step={0.05}
+                value={spaceMouseControl.moveSpeed}
+                onChange={(e) => updateSpaceMouseControl({ moveSpeed: Number(e.target.value) })}
+                className="mt-1 w-full"
+              />
+            </label>
+            <label className="block">
+              Lateral pan boost: {spaceMouseControl.lateralBoost.toFixed(2)}x
+              <input
+                type="range"
+                min={0.4}
+                max={3.5}
+                step={0.05}
+                value={spaceMouseControl.lateralBoost}
+                onChange={(e) => updateSpaceMouseControl({ lateralBoost: Number(e.target.value) })}
+                className="mt-1 w-full"
+              />
+            </label>
+            <label className="block">
+              Rotate speed: {spaceMouseControl.rotateSpeed.toFixed(2)}x
+              <input
+                type="range"
+                min={0.2}
+                max={3}
+                step={0.05}
+                value={spaceMouseControl.rotateSpeed}
+                onChange={(e) => updateSpaceMouseControl({ rotateSpeed: Number(e.target.value) })}
+                className="mt-1 w-full"
+              />
+            </label>
+            <label className="block">
+              Tilt effect (pitch axis): {spaceMouseControl.tiltEffect.toFixed(2)}x
+              <input
+                type="range"
+                min={0}
+                max={2.5}
+                step={0.05}
+                value={spaceMouseControl.tiltEffect}
+                onChange={(e) => updateSpaceMouseControl({ tiltEffect: Number(e.target.value) })}
+                className="mt-1 w-full"
+              />
+            </label>
+            <label className="flex items-center gap-2 text-[#c9d1d9]">
+              <input
+                type="checkbox"
+                checked={spaceMouseControl.invertTilt}
+                onChange={(e) => updateSpaceMouseControl({ invertTilt: e.target.checked })}
+              />
+              Invert tilt direction
+            </label>
+          </div>
+          <div className="mt-3 flex items-center justify-between">
+            <span className="text-[10px] text-[#6e7681]">Saved per browser (local)</span>
+            <button
+              onClick={() => setSpaceMouseControlState(resetControlConfig())}
+              className="h-7 rounded border border-[#30363d] px-2 text-xs text-[#c9d1d9] hover:bg-[#21262d]"
+              data-testid="btn-spacemouse-reset"
+            >
+              Reset
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

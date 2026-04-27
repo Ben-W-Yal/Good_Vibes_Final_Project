@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <customMapSource>
-	<name>GoogleHybrid</name>
+	<name>Bing - Maps</name>
 	<minZoom>0</minZoom>
-	<maxZoom>22</maxZoom>
+	<maxZoom>20</maxZoom>
 	<tileType>png</tileType>
 	<tileUpdate>None</tileUpdate>
-	<url>http://mt1.google.com/vt/lyrs=y&amp;x={$x}&amp;y={$y}&amp;z={$z}</url>
+	<url>https://r0.ortho.tiles.virtualearth.net/tiles/r{$q}.png?g=45</url>
 	<backgroundColor>#000000</backgroundColor>
 </customMapSource>
