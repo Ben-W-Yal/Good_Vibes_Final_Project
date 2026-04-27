@@ -6,41 +6,54 @@ In internal runs during development, GeoIntel reliably delivers four coupled out
 
 Formal benchmarks were out of scope for this course delivery; claims below are qualitative unless noted.
 
-\subsection{Evidence (figures)}
+\subsection{Evidence from the running application}
 
-Figures~\ref{fig:globe}--\ref{fig:terrain} show the integrated dashboard~\cite{cesium}, PDB~\cite{gemini-api}, and terrain/buildings views. Figure~\ref{fig:event-analyst} highlights per-event Gemini output: auto-generated analyst summary and follow-up chat in the event detail sidebar.
+The subsections and paragraphs below introduce each screenshot immediately before it appears so captions stay adjacent to the narrative they support.
 
-\begin{figure}[ht]
+\paragraph{Integrated dashboard (globe, filters, and feed).}
+Figure~\ref{fig:globe} shows the primary workspace: CesiumJS~\cite{cesium} with event markers, regional shortcuts, filter grid (types, regions, time window, sources), and the scrolling event list---the pattern users follow when moving from headlines to map-scale geography.
+
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/globe.png}
   \caption{Cesium globe with conflict/news-style markers and filtering chrome visible.}
   \label{fig:globe}
 \end{figure}
+\FloatBarrier
 
-\begin{figure}[ht]
+\paragraph{Presidential Daily Brief (theater-scale, search-grounded).}
+Figure~\ref{fig:pdb} illustrates the multi-section PDB layout: section navigation, progress, Gemini-attributed narrative blocks, imagery when publishers expose embeddable assets, and citation-style source lists tied to grounded web research~\cite{gemini-api}.
+
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/pdb.png}
   \caption{Presidential Daily Brief panel showing multi-section narrative output and citation chips.}
   \label{fig:pdb}
 \end{figure}
+\FloatBarrier
 
-\begin{figure}[ht]
+\paragraph{Per-event analyst summary and follow-up chat.}
+Figure~\ref{fig:event-analyst} isolates event-level assistance: when a user selects a feed item, the sidebar streams a structured analyst-style summary and supports conversational follow-up on the same \texttt{/api/chat} route with event-scoped context (Implementation).
+
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/event-analyst.png}
   \caption{Event detail sidebar: streamed \textbf{AI analyst summary} of the selected item and \textbf{chat} for follow-up questions (same Gemini route, event-scoped context).}
   \label{fig:event-analyst}
 \end{figure}
+\FloatBarrier
 
 \subsection{Terrain and built environment}
 
-The dashboard screenshot (Figure~\ref{fig:globe}) emphasizes breadth (filters, feeds, markers). Separately, enabling \textbf{Cesium ion global terrain} and \textbf{OSM-derived buildings}---controlled via client environment variables described in Implementation---changes how analysts read topography alongside structures: elevation cues and extruded footprints reduce ambiguity compared with imagery draped on an ellipsoid alone. Figure~\ref{fig:terrain} isolates that perspective-heavy view so reviewers can judge relief and vertical fidelity without confusing it with the PDB layout (which already resembles a printable deck).
+The dashboard view in Figure~\ref{fig:globe} emphasizes breadth (filters, feeds, markers). Separately, enabling \textbf{Cesium ion global terrain} and \textbf{OSM-derived buildings}---controlled via client environment variables described in Implementation---changes how analysts read topography alongside structures: elevation cues and extruded footprints reduce ambiguity compared with imagery draped on an ellipsoid alone. Figure~\ref{fig:terrain} isolates a perspective-heavy coastal view so reviewers can judge relief and vertical fidelity without confusing it with the PDB layout (which already resembles a printable deck).
 
-\begin{figure}[ht]
+\begin{figure}[!htbp]
   \centering
   \includegraphics[width=\linewidth]{figures/terrain.png}
   \caption{Perspective view with ion terrain and buildings enabled (coastal relief and extruded structures visible).}
   \label{fig:terrain}
 \end{figure}
+\FloatBarrier
 
 \subsection{Strengths}
 
