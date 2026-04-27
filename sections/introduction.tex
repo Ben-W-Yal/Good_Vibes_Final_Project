@@ -23,9 +23,9 @@ That is exactly what a structured brief requires.
 Gemini~\cite{gemini-api} with search grounding ties statements to retrieved URLs where the API exposes citations, reducing unattributed speculation.
 Express~\cite{express} API routes in TypeScript orchestrate retrieval, normalization, and prompting. Heavy requests stay off the UI thread; optional Python tooling exists only for peripheral bridges (e.g., SpaceMouse) described in Implementation.
 
-\subsection{Kalman-style reasoning}
+\subsection{Stable context versus incoming signals}
 
-We adopt an intuition borrowed from estimation theory: treat latent conflict ``state'' as something we \emph{predict} from prior observations (historical posts and rolling behavior of feeds), then \emph{update} when fresh measurements arrive---here, grounded web search and contemporaneous indicators. This framing disciplines narrative drift and foregrounds reconciliation between slow-moving priors and fast-moving news.
+Analysts usually keep a slow-changing mental map (theater, terrain, baseline relationships) while processing fast-arriving headlines and tracker updates. GeoIntel mirrors that rhythm in software: persistent globe state, filters, and adapter-backed caches sit alongside refreshed markers, search-grounded brief sections, and streamed per-event text. We do \textbf{not} ship a formal recursive filter or latent-state model in code; the point is UX and orchestration that discourage one-shot narratives detached from the live map and feed state.
 
 \subsection{Limits of the status quo}
 
