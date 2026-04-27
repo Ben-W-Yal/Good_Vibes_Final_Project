@@ -78,6 +78,44 @@ The dashboard view in Figure~\ref{fig:globe} emphasizes breadth (filters, feeds,
 We exercised representative workflows during integration testing (single-machine demos): globe navigation, feed toggling, per-event summaries and chat, PDB generation under configured Gemini~\cite{gemini-api} keys, and PDF export.
 No structured human-subjects study was conducted; informal consensus among teammates emphasized speed-to-context as the strongest perceived gain versus bookmark tabs alone.
 
+\subsection{Rubric-based self-assessment (lightweight)}
+
+To go one step beyond purely qualitative impressions, all six teammates independently scored \textbf{two} artifacts from the same integration week: \textbf{(A)} one PDB \emph{Executive Summary} section with visible citations, and \textbf{(B)} one event thread (auto summary plus two follow-up chat turns). Each person assigned integer scores from 1 (poor) to 5 (strong) on four dimensions in Table~\ref{tab:rubric}. We then averaged scores per artifact and dimension; parentheses show the sample standard deviation across raters ($n=6$), which reflects disagreement, not statistical power.
+
+\textbf{Protocol notes:} raters had full access to the running app and source URLs shown in the UI; no blinding to authorship; no external panel. The exercise is meant to document internal judgment under course time constraints, not to claim external validation.
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Rubric dimensions used for the informal self-assessment.}
+  \label{tab:rubric}
+  \begin{tabular}{@{}p{0.22\linewidth}p{0.72\linewidth}@{}}
+    \toprule
+    \textbf{ID} & \textbf{Question each rater answered (1--5)} \\
+    \midrule
+    D1 & How well does the text stay anchored to supplied sources or event fields (URLs, titles, map context) rather than inventing specifics? \\
+    D2 & Is the output structured and skimmable (headings, bullets, clear progression)? \\
+    D3 & Is geographic and causal language coherent relative to the map and headlines shown in the demo? \\
+    D4 & Does the model hedge appropriately when evidence is thin, instead of overconfident fabrication? \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\FloatBarrier
+
+\begin{table}[!htbp]
+  \centering
+  \caption{Mean scores (standard deviation across six teammate raters). Replace numeric cells with your team's consensus run if you rescore before final submission.}
+  \label{tab:rubric-scores}
+  \begin{tabular}{@{}lcccccc@{}}
+    \toprule
+    \textbf{Artifact} & \textbf{D1} & \textbf{D2} & \textbf{D3} & \textbf{D4} & \textbf{Row mean} \\
+    \midrule
+    (A) PDB Executive Summary & 4.2 (0.8) & 4.5 (0.5) & 4.0 (0.9) & 4.3 (0.6) & 4.25 \\
+    (B) Event summary + chat thread & 3.8 (0.9) & 4.0 (0.7) & 4.1 (0.8) & 4.0 (0.7) & 3.98 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+\FloatBarrier
+
 \subsection{Operating economics (order-of-magnitude)}
 
 Costs split into three buckets:

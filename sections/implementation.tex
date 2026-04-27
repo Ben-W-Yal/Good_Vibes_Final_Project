@@ -10,6 +10,40 @@ GeoIntel follows a classic three-tier layout: a React~\cite{react} single-page c
   \item \textbf{Data plane:} External providers (news/conflict feeds, trackers, satellite TLE sources) are fetched server-side only; credentials stay in environment variables loaded at startup (\texttt{dotenv}).
 \end{enumerate}
 
+Figure~\ref{fig:architecture} sketches the main trust boundary: the browser talks only to Express; adapters and Gemini calls run server-side with keys from the host environment.
+
+\begin{figure}[!htbp]
+  \centering
+  \begin{tikzpicture}[
+      scale=0.94,
+      transform shape,
+      font=\footnotesize,
+      box/.style={
+        rectangle,
+        draw=black!72,
+        rounded corners=2.5pt,
+        line width=0.55pt,
+        align=center,
+        inner sep=5pt,
+        minimum width=2.65cm,
+      },
+    ]
+    \node[box] (ui) {\textbf{Browser client}\\[-0.15em]{\scriptsize React \textbullet{} TypeScript \textbullet{} Cesium}};
+    \node[box, below=1.05cm of ui] (api) {\textbf{Express server}\\[-0.15em]{\scriptsize \texttt{/api/...} routes}};
+    \node[box, below left=1.05cm and 0.15cm of api] (adp) {\textbf{Feed adapters}\\[-0.15em]{\scriptsize \texttt{src/adapters/}}};
+    \node[box, below right=1.05cm and 0.15cm of api] (gem) {\textbf{Gemini calls}\\[-0.15em]{\scriptsize PDB + \texttt{/api/chat}}};
+    \node[box, below=1.15cm of api, yshift=-0.05cm] (ext) {\textbf{Upstream services}\\[-0.15em]{\scriptsize feeds, trackers, Google APIs}};
+    \draw[-{Latex[length=2.1mm]}] (ui) -- node[right, font=\scriptsize] {HTTP(S)} (api);
+    \draw[-{Latex[length=2.1mm]}] (api) -- (adp);
+    \draw[-{Latex[length=2.1mm]}] (api) -- (gem);
+    \draw[-{Latex[length=2.1mm]}] (adp) -- (ext);
+    \draw[-{Latex[length=2.1mm]}] (gem) -- (ext);
+  \end{tikzpicture}
+  \caption{High-level architecture (simplified). Adapters normalize heterogeneous providers; generative routes call Gemini with prompts built from stored context and (for PDB) search tools when enabled.}
+  \label{fig:architecture}
+\end{figure}
+\FloatBarrier
+
 Development uses \texttt{tsx} to run TypeScript directly; production builds bundle the server (\texttt{npm run build}, \texttt{npm start}). The client is developed with Vite and served through the same dev server in typical setups described in the repository README.
 
 \subsection{Globe, terrain, and imagery}
