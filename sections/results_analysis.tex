@@ -2,33 +2,37 @@
 
 \subsection{What we observe qualitatively}
 
-In internal runs during development, GeoIntel reliably delivers three coupled outcomes end-to-end: \textbf{(i)} users can relocate quickly from headline-scale curiosity to map-scale geography; \textbf{(ii)} PDB sections tend to arrive as structured narratives with accompanying citations when Gemini~\cite{gemini-api} grounding succeeds; and \textbf{(iii)} exporting to PDF preserves slide-shaped layouts suitable for classroom submission.
+In internal runs during development, GeoIntel reliably delivers three coupled outcomes end-to-end: \textbf{(i)} users can relocate quickly from headline-scale curiosity to map-scale geography; \textbf{(ii)} PDB sections tend to arrive as structured narratives with accompanying citations when Gemini~\cite{gemini-api} grounding succeeds; and \textbf{(iii)} optional ion-backed terrain and OSM-style building meshes~\cite{cesium}, when enabled, give urban theaters recognizable vertical structure beyond satellite imagery alone. PDF export remains available for slide-shaped classroom deliverables when a document artifact is preferable to screen capture.
 
 Formal benchmarks were out of scope for this course delivery; claims below are qualitative unless noted.
 
-\subsection{Evidence (figures to substitute before final submission)}
+\subsection{Evidence (figures)}
 
-Figures~\ref{fig:globe}--\ref{fig:pdf} show representative UI placeholders (globe~\cite{cesium}, PDB~\cite{gemini-api}, PDF export). Replace gray boxes with screenshots from your demo machine before submitting the PDF.
+Figures~\ref{fig:globe}--\ref{fig:terrain} show representative UI captures (integrated dashboard~\cite{cesium}, PDB~\cite{gemini-api}, terrain and buildings).
 
 \begin{figure}[ht]
   \centering
-  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: Cesium globe with event overlays]\vspace{1.8cm}}}
+  \includegraphics[width=\linewidth]{figures/globe.png}
   \caption{Cesium globe with conflict/news-style markers and filtering chrome visible.}
   \label{fig:globe}
 \end{figure}
 
 \begin{figure}[ht]
   \centering
-  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: PDB panel with sections and citations]\vspace{1.8cm}}}
+  \includegraphics[width=\linewidth]{figures/pdb.png}
   \caption{Presidential Daily Brief panel showing multi-section narrative output and citation chips.}
   \label{fig:pdb}
 \end{figure}
 
+\subsection{Terrain and built environment}
+
+The dashboard screenshot (Figure~\ref{fig:globe}) emphasizes breadth (filters, feeds, markers). Separately, enabling \textbf{Cesium ion global terrain} and \textbf{OSM-derived buildings}---controlled via client environment variables described in Implementation---changes how analysts read topography alongside structures: elevation cues and extruded footprints reduce ambiguity compared with imagery draped on an ellipsoid alone. Figure~\ref{fig:terrain} isolates that perspective-heavy view so reviewers can judge relief and vertical fidelity without confusing it with the PDB layout (which already resembles a printable deck).
+
 \begin{figure}[ht]
   \centering
-  \fbox{\parbox{0.88\linewidth}{\centering\vspace{1.8cm}[Insert screenshot: exported PDF brief excerpt]\vspace{1.8cm}}}
-  \caption{Exported PDF excerpt illustrating slide-oriented formatting.}
-  \label{fig:pdf}
+  \includegraphics[width=\linewidth]{figures/terrain.png}
+  \caption{Perspective view with ion terrain and buildings enabled (coastal relief and extruded structures visible).}
+  \label{fig:terrain}
 \end{figure}
 
 \subsection{Strengths}
