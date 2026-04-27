@@ -2,13 +2,15 @@
 
 \subsection{Summary}
 
-GeoIntel tackles the situational overload problem posed in the Introduction: fragmented conflict and OSINT signals are hard to reconcile with geography and with defensible narrative synthesis. By unifying feed ingestion, interactive 3D mapping, and Gemini-grounded briefing in one application, the project shows that users can move faster from headline-scale awareness to map-scale reasoning and citation-backed writing.
+GeoIntel tackles the situational overload problem posed in the Introduction: fragmented conflict and OSINT signals are hard to reconcile with geography and with defensible narrative synthesis. By unifying feed ingestion, interactive 3D mapping, and Gemini-grounded briefing in one application, the project shows that users can move faster from headline-scale awareness to map-scale reasoning and citation-backed writing. The same design ethic extends to \textbf{per-event analyst summaries and chat}: after a user selects a marker, those flows keep the model tethered to the normalized event record and related URLs, offering drill-down Q\&A without pretending the system has independent field reporting.
 
 \subsection{Main findings and lessons learned}
 
 \textbf{Coupling matters:} Narrative summarization without geography under-serves conflict understanding; geography without narrative oversimplifies motive and consequence. The strongest user experience emerges when citations, imagery (where available), and terrain context co-locate with the brief.
 
-\textbf{Orchestration beats one-shot prompting:} Section-by-section PDB generation is more resilient than a single mega-prompt because failure surfaces per section and partial success still produces value.
+\textbf{Orchestration beats one-shot prompting:} Section-by-section PDB generation is more resilient than a single mega-prompt because failure surfaces per section and partial success still produces value. Event-level chat reuses a single streaming route with explicit transcript handling so follow-ups build on prior turns instead of restating boilerplate.
+
+\textbf{Two scales of assistance:} Theater-scale PDB sections (search-grounded where configured) and map-click summaries serve different tasks; both work best when the UI makes the evidence boundary obvious---what came from adapters versus what the model inferred.
 
 \textbf{Humility remains mandatory:} Grounding reduces hallucination risk but does not eliminate it; upstream coverage gaps and ambiguous reporting still require human verification, especially around contested casualty or attribution claims.
 
@@ -26,4 +28,4 @@ Scaling this idea beyond classroom demos requires systematic red-team exercises 
 
 \subsection{Closing}
 
-The project demonstrates a practical template: \textbf{treat generative AI as a structured writer under server-side constraints}, not as an autonomous analyst, and \textbf{treat maps and citations as first-class outputs} so users retain the habit of verifying what they see. That combination is the strongest thread back to our original motivation: helping people interact with conflict news through place, evidence, and accountable synthesis.
+The project demonstrates a practical template: \textbf{treat generative AI as a structured writer under server-side constraints}, not as an autonomous analyst, and \textbf{treat maps and citations as first-class outputs} so users retain the habit of verifying what they see. The per-event analyst path belongs in that same template: chat is useful only when it stays answerable to the clicked record. That combination is the strongest thread back to our original motivation: helping people interact with conflict news through place, evidence, and accountable synthesis.
